@@ -1,114 +1,160 @@
-# Pumpfun Volume Bot
-This is a Pump.fun volume bot that can increase the volume of a specific Pump.fun token, controlled via Telegram.
+# Xtoshi Pumpfun Volume Bot
 
-## Screenshot
+A production-ready Pump.fun volume bot for Solana with a secure Telegram control panel. It manages a fleet of sub-wallets, builds and extends an Address Lookup Table (LUT) for compact v0 transactions, and executes randomized buy/sell cycles to generate on-chain volume. Includes safeguards, rate limits, and operational controls.
 
-![image](https://github.com/user-attachments/assets/fc57859d-0e89-4cf2-be98-81b22c4ccc5b) <!-- Replace with your actual screenshot if you have one -->
 
-## Main Features
+## Features
 
-- Analyzes Pump.fun token details (bonding curve, reserves).
-- Creates and manages a pool of sub-wallets (`wallets.json`).
-- Creates and extends a Solana Address Lookup Table (LUT) for efficient transactions (`lut.json`).
-- Submits transactions via Jito Bundles for potential MEV protection and faster inclusion.
-- Distributes SOL from a main wallet to sub-wallets.
-- Performs buy-then-sell swap cycles using sub-wallets to generate volume.
-- Can sell all tokens held by sub-wallets for a specific mint.
-- Can collect all SOL from sub-wallets back to the main wallet.
-- Secure Telegram bot interface for configuration and control:
-    - User ID whitelisting for authorized access.
-    - Configurable SOL amount per swap/distribution.
-    - Configurable target token address.
-    - Configurable sleep time between swap cycles.
-    - Configurable slippage for trades (with safety limits).
-    - Start/Stop bot operations.
-    - Buttons for "Sell All Tokens" and "Collect All SOL".
-- Restrictive file permissions set for `wallets.json` and `lut.json` on creation (on POSIX systems).
+- **Telegram control panel**: Start/stop, configure SOL per swap, slippage, target token, sleep time, and trigger maintenance actions.
+- **Wallet orchestration**: Create and load sub-wallets from `wallets.json` with restrictive permissions where possible.
+- **LUT lifecycle**: Create, load, and extend a lookup table (`lut.json`) to fit large instruction sets into v0 transactions.
+- **Jito bundle support**: Submit critical transactions via Jito for potential MEV protection and inclusion speed (with optional tip).
+- **Distribution and collection**:
+  - Distribute SOL from the main wallet to sub-wallets.
+  - Collect SOL from sub-wallets back to the main wallet.
+- **Swap engine**: Randomized buy-then-sell cycles per wallet chunk with compute budget tuning and basic guardrails.
+- **Sell-all**: Attempt to liquidate all target tokens across sub-wallets.
+- **Safety checks**: Slippage bounds, balance checks, simulated sends in select flows, and file permission hints.
 
-## How to Run
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <your-repo-url>
-    cd Volume_bot
-    ```
+## Requirements
 
-2.  **Install dependencies:**
-    ```bash
-    yarn install
-    # or
-    # npm install
-    ```
+- Node.js 18+
+- Yarn or npm
+- A Solana RPC endpoint (e.g., Helius, QuickNode, Triton, or your own)
+- A funded Solana wallet private key (base58-encoded 64-byte secret key)
+- A Telegram bot token and your Telegram user ID(s)
 
-3.  **Create and configure `.env` file:**
-    Create a file named `.env` in the `Volume_bot` root directory.
 
-    **IMPORTANT SECURITY NOTE for `.env` file:**
-    Manually set restrictive permissions for your `.env` file on your server/system. This is crucial to protect your private key.
-    For example, on Linux/macOS:
-    ```bash
-    chmod 600 .env
-    ```
-    This makes the file readable and writable only by the owner.
+## Quick Start
 
-    **`.env` file content:**
-    ```env
-    RPC_URL=YOUR_SOLANA_RPC_URL_HERE
-    PRIVATE_KEY=YOUR_MAIN_WALLET_PRIVATE_KEY_BS58_ENCODED
-    TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
-    TELEGRAM_ALLOWED_USER_IDS="123456789,987654321" # Comma-separated Telegram User IDs that can control the bot
-    # JITO_TIP_AMOUNT_LAMPORTS=10000 # Optional: Jito tip in lamports (e.g., 10000 for 0.00001 SOL) - defaults in config.ts if not set
-    # NODE_ENV=development_open # UNCOMMENT FOR LOCAL TESTING ONLY TO BYPASS USER ID RESTRICTION - HUGE SECURITY RISK IN PROD
-    ```
-    *   `RPC_URL`: Your Solana RPC endpoint (e.g., from QuickNode, Helius, Triton, or your own node).
-    *   `PRIVATE_KEY`: The secret key of your main Solana wallet (base58 encoded array of 64 bytes). This wallet will fund operations.
-    *   `TELEGRAM_BOT_TOKEN`: Get this from BotFather on Telegram.
-    *   `TELEGRAM_ALLOWED_USER_IDS`: A comma-separated list of numeric Telegram user IDs. Only these users can interact with the bot. You can get your ID by messaging a bot like `@userinfobot` on Telegram.
+1) Clone and install
 
-4.  **Review Default Configurations (Optional):**
-    Check `src/config.ts` for default values like `DefaultJitoTipAmountLamports`, `DefaultSlippage`, etc. These are used if not overridden by Telegram settings or environment variables.
+```bash
+git clone https://github.com/xtoshi999/Smart_Pumpfun_Volume_Bot.git
+cd Smart_Pumpfun_Volume_Bot
+# Using yarn
+yarn install
+# or npm
+# npm install
+```
 
-5.  **File Handling (`wallets.json`, `lut.json`):**
-    *   The bot will attempt to create `wallets.json` (for sub-wallets) and `lut.json` (for the Address Lookup Table) if they don't exist when you first start operations via Telegram that require them (e.g., starting the bot, distributing SOL).
-    *   Restrictive file permissions (`0o400` for `wallets.json`, `0o600` for `lut.json`) will be set upon creation on POSIX-compatible systems.
+2) Create .env
 
-6.  **Start the Telegram Bot Controller:**
-    ```bash
-    yarn bot
-    # or
-    # npm run bot
-    ```
-    The bot will log its status to the console.
+Create a `.env` file in the project root with:
 
-7.  **Interact with the Bot on Telegram:**
-    *   Find your bot on Telegram (the one you created with BotFather).
-    *   If your Telegram User ID is in `TELEGRAM_ALLOWED_USER_IDS`, you can send commands:
-        *   `/help`: Shows available commands and how to use settings.
-        *   `/settings`: Opens the main control panel to configure SOL amount, token address, slippage, sleep time, and to start/stop the bot, sell tokens, or collect SOL.
-        *   `/status`: Shows the current configuration and running status.
+```env
+RPC_URL=YOUR_SOLANA_RPC_URL
+PRIVATE_KEY=YOUR_MAIN_WALLET_PRIVATE_KEY_BS58
+TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
+TELEGRAM_ALLOWED_USER_IDS="123456789,987654321"
+# Optional overrides
+# JITO_TIP_AMOUNT_LAMPORTS=1000000   # default ~0.001 SOL
+# NODE_ENV=development_open          # DEV ONLY: opens bot to anyone (unsafe)
+```
 
-8.  **Standalone Script Execution (for testing `PumpfunVbot` directly - Optional):**
-    *   You can test parts of the `PumpfunVbot` logic without the Telegram interface.
-    *   Temporarily uncomment the `(async () => { ... })();` block at the end of `index.ts`.
-    *   Ensure `DefaultCA` and other defaults in `src/config.ts` are set appropriately for your test, or modify the example block in `index.ts`.
-    *   Run:
-        ```bash
-        yarn start
-        # or
-        # npm start
-        ```
-    *   **Remember to re-comment this block when running the Telegram bot via `yarn bot`.**
+Security tip (POSIX):
+```bash
+chmod 600 .env
+```
 
-## Important Security Considerations
+3) Start the Telegram controller
 
-*   **Private Key Security:** Your `PRIVATE_KEY` in the `.env` file controls your main funds. Protect this file diligently. The `chmod 600 .env` step is critical.
-*   **Telegram User ID Whitelisting:** Ensure `TELEGRAM_ALLOWED_USER_IDS` is correctly set to prevent unauthorized access to bot controls. If left empty or misconfigured (and not in `development_open` mode), the bot might deny all access or be open, which is a major risk.
-*   **Sub-Wallet Keys (`wallets.json`):** While the bot sets permissions to read-only for the owner, if the server itself is compromised, these keys could be accessed.
-*   **Slippage:** Be extremely cautious with slippage settings. High slippage can lead to significant losses in volatile markets or due to MEV (e.g., sandwich attacks). The bot has a configurable slippage with a maximum limit enforced by the Telegram UI (defaulting to 5%).
-*   **RPC Node:** Use a reliable and private RPC node for critical operations. Public nodes can be rate-limited or less reliable.
-*   **Test Thoroughly:** Before running with significant funds, test all functionalities on a devnet or with very small amounts on mainnet to understand its behavior and costs.
-*   **Jito Bundles:** While Jito bundles can offer MEV protection, they are not a perfect guarantee. Understand their characteristics.
-*   **No Guarantees:** This bot interacts with decentralized systems and markets. There are inherent risks. Use at your own discretion and responsibility.
+```bash
+yarn bot
+# or
+# npm run bot
+```
 
-## Author
-- [TELEGRAM](https://t.me/darksoul814)
+4) Open Telegram and send /settings to your bot
+
+- Use the inline buttons to configure:
+  - SOL/Swap
+  - Slippage (0.1%–50%)
+  - Token (Pump.fun CA)
+  - Sleep time between cycles
+  - Start/Stop bot
+  - Sell All Tokens
+  - Collect All SOL
+
+
+## Scripts
+
+- `yarn bot` — Run the Telegram controller (`bot.ts`).
+- `yarn start` — Run the standalone entry (`index.ts`) for direct testing.
+- `yarn build` — TypeScript build.
+- `yarn lint` — Lint the project.
+
+
+## Configuration Reference
+
+Defined in `src/config.ts` and overridable via Telegram UI or env vars:
+
+- `DefaultDistributeAmountLamports` — default SOL per sub-wallet (lamports)
+- `DefaultJitoTipAmountLamports` — default Jito tip (lamports)
+- `DefaultSlippage` — default slippage fraction (e.g., 0.5 = 50%)
+- `DefaultCA` — default target token CA placeholder
+
+Required env vars (process will exit if missing):
+- `RPC_URL`
+- `PRIVATE_KEY`
+- `TELEGRAM_BOT_TOKEN`
+
+Access control:
+- `TELEGRAM_ALLOWED_USER_IDS` — comma-separated numeric IDs. If empty and not in `development_open`, access is denied.
+
+
+## How It Works
+
+- `wallets.json`: Stores generated sub-wallet secret keys (base58). Created automatically when needed. Attempts to set read-only perms.
+- `lut.json`: Stores the created LUT address. Used to compile v0 messages with address tables for compact transactions.
+- Swap loop:
+  - Chunks sub-wallets.
+  - For each wallet, computes buy and immediate sell with randomized SOL sizes, ATA creation/closure, and guardrails.
+  - Uses compute-unit budget settings and optionally Jito tips.
+
+
+## Operational Guidance
+
+- Fund your main wallet sufficiently before starting. The bot estimates costs and will warn for low balance.
+- Start small. Test on mainnet with tiny amounts or on a private RPC to validate your setup.
+- Keep slippage conservative. High slippage increases loss/MEV risk.
+- Prefer private, reliable RPC endpoints.
+- Windows note: POSIX file permissions (chmod) may not apply; handle secrets appropriately.
+
+
+## Troubleshooting
+
+- Bot exits on startup:
+  - Ensure `RPC_URL`, `PRIVATE_KEY`, and `TELEGRAM_BOT_TOKEN` exist in `.env`.
+- Unauthorized in Telegram:
+  - Add your numeric user ID(s) to `TELEGRAM_ALLOWED_USER_IDS`.
+- Failing token validation:
+  - Verify the token is a valid Pump.fun mint and reachable via your RPC.
+- LUT errors:
+  - Let the bot create one if `lut.json` is missing, then wait ~20–30s for chain visibility.
+- Transaction too large:
+  - The bot already chunks instructions, but very large sets may still exceed limits. Reduce wallets per cycle if needed.
+
+
+## Security Considerations
+
+- Your `.env` contains the main wallet private key. Keep it secret and locked down.
+- If the host is compromised, `wallets.json` sub-wallet keys can be stolen.
+- Do not enable `development_open` outside local testing.
+- Jito bundles and slippage are risk mitigations, not guarantees.
+
+
+## Disclaimer
+
+This software interacts with decentralized markets and carries inherent financial and technical risks. There are no performance guarantees. Use at your own risk and responsibility.
+
+
+## License
+
+MIT
+
+
+## Contact
+
+- Telegram: [@xtoshi999](https://t.me/xtoshi999)
