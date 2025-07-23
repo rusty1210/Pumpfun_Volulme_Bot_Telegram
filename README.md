@@ -1,9 +1,9 @@
-# Xtoshi Pumpfun Volume Bot
+# 🚀 Xtoshi Pumpfun Volume Bot
 
 A production-ready Pump.fun volume bot for Solana with a secure Telegram control panel. It manages a fleet of sub-wallets, builds and extends an Address Lookup Table (LUT) for compact v0 transactions, and executes randomized buy/sell cycles to generate on-chain volume. Includes safeguards, rate limits, and operational controls.
 
 
-## Features
+## ✨ Features
 
 - **Telegram control panel**: Start/stop, configure SOL per swap, slippage, target token, sleep time, and trigger maintenance actions.
 - **Wallet orchestration**: Create and load sub-wallets from `wallets.json` with restrictive permissions where possible.
@@ -17,7 +17,7 @@ A production-ready Pump.fun volume bot for Solana with a secure Telegram control
 - **Safety checks**: Slippage bounds, balance checks, simulated sends in select flows, and file permission hints.
 
 
-## Requirements
+## 📦 Requirements
 
 - Node.js 18+
 - Yarn or npm
@@ -26,7 +26,7 @@ A production-ready Pump.fun volume bot for Solana with a secure Telegram control
 - A Telegram bot token and your Telegram user ID(s)
 
 
-## Quick Start
+## ⚡ Quick Start
 
 1) Clone and install
 
@@ -78,7 +78,7 @@ yarn bot
   - Collect All SOL
 
 
-## Scripts
+## 📜 Scripts
 
 - `yarn bot` — Run the Telegram controller (`bot.ts`).
 - `yarn start` — Run the standalone entry (`index.ts`) for direct testing.
@@ -86,7 +86,7 @@ yarn bot
 - `yarn lint` — Lint the project.
 
 
-## Configuration Reference
+## 🛠️ Configuration Reference
 
 Defined in `src/config.ts` and overridable via Telegram UI or env vars:
 
@@ -104,7 +104,7 @@ Access control:
 - `TELEGRAM_ALLOWED_USER_IDS` — comma-separated numeric IDs. If empty and not in `development_open`, access is denied.
 
 
-## How It Works
+## 🔬 How It Works
 
 - `wallets.json`: Stores generated sub-wallet secret keys (base58). Created automatically when needed. Attempts to set read-only perms.
 - `lut.json`: Stores the created LUT address. Used to compile v0 messages with address tables for compact transactions.
@@ -114,7 +114,7 @@ Access control:
   - Uses compute-unit budget settings and optionally Jito tips.
 
 
-## Operational Guidance
+## 🧭 Operational Guidance
 
 - Fund your main wallet sufficiently before starting. The bot estimates costs and will warn for low balance.
 - Start small. Test on mainnet with tiny amounts or on a private RPC to validate your setup.
@@ -123,7 +123,7 @@ Access control:
 - Windows note: POSIX file permissions (chmod) may not apply; handle secrets appropriately.
 
 
-## Troubleshooting
+## 🧩 Troubleshooting
 
 - Bot exits on startup:
   - Ensure `RPC_URL`, `PRIVATE_KEY`, and `TELEGRAM_BOT_TOKEN` exist in `.env`.
@@ -137,7 +137,7 @@ Access control:
   - The bot already chunks instructions, but very large sets may still exceed limits. Reduce wallets per cycle if needed.
 
 
-## Security Considerations
+## 🔐 Security Considerations
 
 - Your `.env` contains the main wallet private key. Keep it secret and locked down.
 - If the host is compromised, `wallets.json` sub-wallet keys can be stolen.
@@ -145,16 +145,16 @@ Access control:
 - Jito bundles and slippage are risk mitigations, not guarantees.
 
 
-## Disclaimer
+## ⚠️ Disclaimer
 
 This software interacts with decentralized markets and carries inherent financial and technical risks. There are no performance guarantees. Use at your own risk and responsibility.
 
 
-## License
+## 📄 License
 
 MIT
 
 
-## Contact
+## 📬 Contact
 
 - Telegram: [@xtoshi999](https://t.me/xtoshi999)
