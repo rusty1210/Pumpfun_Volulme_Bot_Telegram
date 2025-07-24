@@ -150,10 +150,6 @@ Access control:
 This software interacts with decentralized markets and carries inherent financial and technical risks. There are no performance guarantees. Use at your own risk and responsibility.
 
 
-## 📄 License
-
-MIT
-
 
 ## 📬 Contact
 
