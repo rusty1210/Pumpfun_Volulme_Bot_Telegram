@@ -3,7 +3,6 @@ import axios from "axios";
 
 export const endpoints = {
   // ams: "https://amsterdam.mainnet.block-engine.jito.wtf",
-  // ger: "https://frankfurt.mainnet.block-engine.jito.wtf",
   // ny: "https://ny.mainnet.block-engine.jito.wtf",
   // tokyo: "https://tokyo.mainnet.block-engine.jito.wtf",
   default: "https://mainnet.block-engine.jito.wtf",
