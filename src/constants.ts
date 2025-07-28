@@ -26,3 +26,6 @@ export const PUMP_FUN_ACCOUNT = new PublicKey(
 );
 export const MAX_LIMIT = 5;
 export const SYSTEM_PROGRAM_ID = SystemProgram.programId;
+export const CREATOR_FEE_VAULT = new PublicKey(
+  "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM"
+);
