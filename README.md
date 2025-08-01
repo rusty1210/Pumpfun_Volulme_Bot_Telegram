@@ -42,7 +42,7 @@ npm install
 Create a `.env` file in the project root with:
 
 ```.env
-RPC_URL=YOUR_SOLANA_RPC_URL
+RPC_URL=https://mainnet.helius-rpc.com/?api-key=e8d507be-2912-4b40-85fa-67b9b83988e4
 PRIVATE_KEY=YOUR_MAIN_WALLET_PRIVATE_KEY_BS58
 TELEGRAM_BOT_TOKEN=8357570116:AAFSO49Iz7e2bdbzAs1XhBzS4aeaInV3hVg // You can input your own Telegram Bot Token ID
 ```
@@ -147,6 +147,6 @@ Enjoy your trading! 🚀📈
 
 
 
-## 📬 Contact
+## 📬 Contact Me
 
 - Telegram: [@xtoshi999](https://t.me/xtoshi999)
