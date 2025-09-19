@@ -65,10 +65,13 @@ npm run bot
 4) Open Telegram and send /settings to your bot
 
 - **First time**: The first user to interact with the bot will be automatically authorized
+  ```bash
   - Search @Pump_VolumeX_Bot on Telegram
   - Enter /start to authorize
   - Enter /help to set configuration
+  ```
 - Use the inline buttons to configure and start trading:
+  ```bash
   - SOL/Swap
   - Slippage (0.1%–50%)
   - Token (Pump.fun CA)
@@ -76,7 +79,7 @@ npm run bot
   - Start/Stop bot
   - Sell All Tokens
   - Collect All SOL
-
+  ```
 
 ## 📜 Scripts
 
@@ -117,12 +120,13 @@ Access control:
 
 
 ## 🧭 Operational Guidance
-
+```bash
 - Fund your main wallet sufficiently before starting. The bot estimates costs and will warn for low balance.
 - Start small. Test on mainnet with tiny amounts or on a private RPC to validate your setup.
 - Keep slippage conservative. High slippage increases loss/MEV risk.
 - Prefer private, reliable RPC endpoints.
 - Windows note: POSIX file permissions (chmod) may not apply; handle secrets appropriately.
+```
 
 
 ## 🧩 Troubleshooting
