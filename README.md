@@ -1,6 +1,15 @@
 # 🚀 Telegram Pump Volume Bot 📈
 
-A production-ready Pump.fun volume bot for Solana with a secure Telegram control panel. It manages a fleet of sub-wallets, builds and extends an Address Lookup Table (LUT) for compact v0 transactions, and executes randomized buy/sell cycles to generate on-chain volume. Includes safeguards, rate limits, and operational controls.
+## 🌊 Welcome to Pumpfun VolumeX Bot
+
+Pumpfun VolumeX Bot is a powerful automation tool designed for the Pumpfun platform.
+It streamlines SPL token activity by:
+
+- 💸 Distributing SOL across multiple wallets
+- 🔄 Executing continuous buy & sell transactions using those wallets
+- 📈 Boosting on-chain volume and liquidity for your chosen SPL tokens
+
+With its high-speed, multi-wallet strategy, Pumpfun VolumeX Bot gives your token activity a smooth, automated edge — no manual juggling required.
 
 
 ## ✨ Features
@@ -150,3 +159,4 @@ Enjoy your trading! 🚀📈
 ## 📬 Contact Me
 
 - Telegram: [@xtoshi999](https://t.me/xtoshi999)
+### 🌹 You're always welcome! 🌹
