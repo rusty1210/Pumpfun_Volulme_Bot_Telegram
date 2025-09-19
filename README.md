@@ -1,4 +1,4 @@
-# 🚀 Xtoshi Pumpfun Volume Bot
+# 🚀 Telegram Pump Volume Bot 📈
 
 A production-ready Pump.fun volume bot for Solana with a secure Telegram control panel. It manages a fleet of sub-wallets, builds and extends an Address Lookup Table (LUT) for compact v0 transactions, and executes randomized buy/sell cycles to generate on-chain volume. Includes safeguards, rate limits, and operational controls.
 
@@ -31,44 +31,35 @@ A production-ready Pump.fun volume bot for Solana with a secure Telegram control
 1) Clone and install
 
 ```bash
-git clone https://github.com/xtoshi999/Smart_Pumpfun_Volume_Bot.git
-cd Smart_Pumpfun_Volume_Bot
-# Using yarn
-yarn install
-# or npm
-# npm install
+git clone https://github.com/xtoshi999/Pumpfun_VolumeX_Bot_Telegram.git
+cd Pumpfun_VolumeX_Bot_Telegram
+
+npm install
 ```
 
 2) Create .env
 
 Create a `.env` file in the project root with:
 
-```env
+```.env
 RPC_URL=YOUR_SOLANA_RPC_URL
 PRIVATE_KEY=YOUR_MAIN_WALLET_PRIVATE_KEY_BS58
-TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
-# Optional overrides
-# JITO_TIP_AMOUNT_LAMPORTS=1000000   # default ~0.001 SOL
-# TELEGRAM_ALLOWED_USER_IDS="123456789,987654321"  # Optional: manual user IDs (auto-capture is enabled by default)
-```
-
-Security tip (POSIX):
-```bash
-chmod 600 .env
+TELEGRAM_BOT_TOKEN=8357570116:AAFSO49Iz7e2bdbzAs1XhBzS4aeaInV3hVg // You can input your own Telegram Bot Token ID
 ```
 
 3) Start the Telegram controller
 
 ```bash
-yarn bot
-# or
-# npm run bot
+npm run bot
 ```
 
 4) Open Telegram and send /settings to your bot
 
 - **First time**: The first user to interact with the bot will be automatically authorized
-- Use the inline buttons to configure:
+  - Search @Pump_VolumeX_Bot on Telegram
+  - Enter /start to authorize
+  - Enter /help to set configuration
+- Use the inline buttons to configure and start trading:
   - SOL/Swap
   - Slippage (0.1%–50%)
   - Token (Pump.fun CA)
@@ -80,10 +71,10 @@ yarn bot
 
 ## 📜 Scripts
 
-- `yarn bot` — Run the Telegram controller (`bot.ts`).
-- `yarn start` — Run the standalone entry (`index.ts`) for direct testing.
-- `yarn build` — TypeScript build.
-- `yarn lint` — Lint the project.
+- `npm run bot` — Run the Telegram controller (`bot.ts`).
+- `npm run start` — Run the standalone entry (`index.ts`) for direct testing.
+- `npm run build` — TypeScript build.
+- `npm run lint` — Lint the project.
 
 
 ## 🛠️ Configuration Reference
@@ -148,9 +139,11 @@ Access control:
 - Jito bundles and slippage are risk mitigations, not guarantees.
 
 
-## ⚠️ Disclaimer
+## 🎯 Conclusion
 
-This software interacts with decentralized markets and carries inherent financial and technical risks. There are no performance guarantees. Use at your own risk and responsibility.
+This bot automates the process of buying and selling tokens on the Solana blockchain using specified parameters and cycles. It integrates with Telegram to provide a user-friendly interface for monitoring and configuring the bot.
+
+Enjoy your trading! 🚀📈
 
 
 

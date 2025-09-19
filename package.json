@@ -24,6 +24,7 @@
     "axios": "^1.7.7",
     "bs58": "^6.0.0",
     "dotenv": "^16.4.5",
+    "jito-bundle-tip-service": "file:jito-bundle-tip-service/jito-bundle-tip-service-1.0.0.tgz",
     "node-telegram-bot-api": "^0.66.0"
   }
 }

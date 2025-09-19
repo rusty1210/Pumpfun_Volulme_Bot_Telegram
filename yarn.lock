@@ -284,7 +284,7 @@
     "@solana/spl-token-metadata" "^0.1.6"
     "buffer" "^6.0.3"
 
-"@solana/web3.js@^1.32.0", "@solana/web3.js@^1.73.0", "@solana/web3.js@^1.88.0", "@solana/web3.js@^1.95.3", "@solana/web3.js@^1.95.5":
+"@solana/web3.js@^1.32.0", "@solana/web3.js@^1.73.0", "@solana/web3.js@^1.87.6", "@solana/web3.js@^1.88.0", "@solana/web3.js@^1.95.3", "@solana/web3.js@^1.95.5":
   "integrity" "sha512-BqVwEG+TaG2yCkBMbD3C4hdpustR4FpuUFRPUmqRZYYlPI9Hg4XMWxHWOWRzHE9Lkc9NDjzXFX7lDXSgzC7R1A=="
   "resolved" "https://registry.npmjs.org/@solana/web3.js/-/web3.js-1.98.2.tgz"
   "version" "1.98.2"
@@ -1606,6 +1606,13 @@
     "JSONStream" "^1.3.5"
     "uuid" "^8.3.2"
     "ws" "^7.5.10"
+
+"jito-bundle-tip-service@file:jito-bundle-tip-service/jito-bundle-tip-service-1.0.0.tgz":
+  "integrity" "sha512-NzRTIPX8SW9ADPSOZvKikW9XNLneFdLAnnHu5RjMB67wMO79WzkHKPE2lbpEXer4Zg/v0j3aENUz/qtNMMUeDQ=="
+  "resolved" "file:jito-bundle-tip-service/jito-bundle-tip-service-1.0.0.tgz"
+  "version" "1.0.0"
+  dependencies:
+    "@solana/web3.js" "^1.87.6"
 
 "joycon@^3.1.1":
   "integrity" "sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw=="
