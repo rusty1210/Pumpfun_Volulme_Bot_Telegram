@@ -23,7 +23,7 @@ A production-ready Pump.fun volume bot for Solana with a secure Telegram control
 - Yarn or npm
 - A Solana RPC endpoint (e.g., Helius, QuickNode, Triton, or your own)
 - A funded Solana wallet private key (base58-encoded 64-byte secret key)
-- A Telegram bot token and your Telegram user ID(s)
+- A Telegram bot token (user ID will be auto-captured)
 
 
 ## ⚡ Quick Start
@@ -47,10 +47,9 @@ Create a `.env` file in the project root with:
 RPC_URL=YOUR_SOLANA_RPC_URL
 PRIVATE_KEY=YOUR_MAIN_WALLET_PRIVATE_KEY_BS58
 TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
-TELEGRAM_ALLOWED_USER_IDS="123456789,987654321"
 # Optional overrides
 # JITO_TIP_AMOUNT_LAMPORTS=1000000   # default ~0.001 SOL
-# NODE_ENV=development_open          # DEV ONLY: opens bot to anyone (unsafe)
+# TELEGRAM_ALLOWED_USER_IDS="123456789,987654321"  # Optional: manual user IDs (auto-capture is enabled by default)
 ```
 
 Security tip (POSIX):
@@ -68,6 +67,7 @@ yarn bot
 
 4) Open Telegram and send /settings to your bot
 
+- **First time**: The first user to interact with the bot will be automatically authorized
 - Use the inline buttons to configure:
   - SOL/Swap
   - Slippage (0.1%–50%)
@@ -101,13 +101,15 @@ Required env vars (process will exit if missing):
 - `TELEGRAM_BOT_TOKEN`
 
 Access control:
-- `TELEGRAM_ALLOWED_USER_IDS` — comma-separated numeric IDs. If empty and not in `development_open`, access is denied.
+- **Auto-capture mode** (default): The first user to interact with the bot is automatically authorized
+- `TELEGRAM_ALLOWED_USER_IDS` — Optional: comma-separated numeric IDs for manual user management
 
 
 ## 🔬 How It Works
 
 - `wallets.json`: Stores generated sub-wallet secret keys (base58). Created automatically when needed. Attempts to set read-only perms.
 - `lut.json`: Stores the created LUT address. Used to compile v0 messages with address tables for compact transactions.
+- `telegram_user_id.json`: Stores the automatically captured Telegram user ID for authorization.
 - Swap loop:
   - Chunks sub-wallets.
   - For each wallet, computes buy and immediate sell with randomized SOL sizes, ATA creation/closure, and guardrails.
@@ -128,7 +130,8 @@ Access control:
 - Bot exits on startup:
   - Ensure `RPC_URL`, `PRIVATE_KEY`, and `TELEGRAM_BOT_TOKEN` exist in `.env`.
 - Unauthorized in Telegram:
-  - Add your numeric user ID(s) to `TELEGRAM_ALLOWED_USER_IDS`.
+  - The first user to interact with the bot is automatically authorized
+  - If you need to change the authorized user, delete `telegram_user_id.json` and restart the bot
 - Failing token validation:
   - Verify the token is a valid Pump.fun mint and reachable via your RPC.
 - LUT errors:
@@ -141,7 +144,7 @@ Access control:
 
 - Your `.env` contains the main wallet private key. Keep it secret and locked down.
 - If the host is compromised, `wallets.json` sub-wallet keys can be stolen.
-- Do not enable `development_open` outside local testing.
+- The `telegram_user_id.json` file contains the authorized user ID - keep it secure.
 - Jito bundles and slippage are risk mitigations, not guarantees.
 
 

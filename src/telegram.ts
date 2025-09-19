@@ -7,8 +7,9 @@ import {
     DefaultSlippage,
     DefaultCA,
     DefaultDistributeAmountLamports,
-    TELEGRAM_ALLOWED_USER_IDS,
     TELEGRAM_BOT_TOKEN,
+    getCapturedUserId,
+    saveCapturedUserId,
 } from './config';
 import fs from 'fs';
 
@@ -46,7 +47,13 @@ class TelegramController {
         }
         this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
         this.setupCommands();
-        console.log("TelegramController initialized. Allowed users:", TELEGRAM_ALLOWED_USER_IDS.join(', ') || "NONE (CRITICAL SECURITY RISK!)");
+        
+        const capturedUserId = getCapturedUserId();
+        if (capturedUserId) {
+            console.log(`TelegramController initialized. Authorized user ID: ${capturedUserId}`);
+        } else {
+            console.log("TelegramController initialized. No user ID captured yet. First user to interact will be automatically authorized.");
+        }
     }
 
     private async sendMessageWithRetry(chatId: number, text: string, options?: TelegramBot.SendMessageOptions): Promise<TelegramBot.Message> {
@@ -113,15 +120,18 @@ class TelegramController {
 
     private isUserAllowed(userId?: number): boolean {
         if (!userId) return false;
-        if (TELEGRAM_ALLOWED_USER_IDS.length === 0) {
-            if (process.env.NODE_ENV === 'development_open') {
-                console.warn("SECURITY_DEV_ONLY: Bot running in open mode due to NODE_ENV=development_open.");
-                return true;
-            }
-            console.error("CRITICAL: No authorized users configured and not in development_open mode. Denying access.");
-            return false;
+        
+        const capturedUserId = getCapturedUserId();
+        
+        // If no user ID has been captured yet, capture this user as the first authorized user
+        if (capturedUserId === null) {
+            saveCapturedUserId(userId);
+            console.log(`🎉 First user interaction detected! User ID ${userId} has been automatically authorized.`);
+            return true;
         }
-        return TELEGRAM_ALLOWED_USER_IDS.includes(userId);
+        
+        // Check if this user matches the captured user ID
+        return userId === capturedUserId;
     }
 
     private setupCommands() {
@@ -134,11 +144,22 @@ class TelegramController {
     private async handleGenericCommand(msg: TelegramBot.Message, handler: (msg: TelegramBot.Message) => Promise<void>) {
         const chatId = msg.chat.id;
         const userId = msg.from?.id;
+        
+        // Check if this is the first user interaction
+        const capturedUserId = getCapturedUserId();
+        const isFirstUser = capturedUserId === null;
+        
         if (!this.isUserAllowed(userId)) {
             await this.sendMessageWithRetry(chatId, "🚫 You are not authorized to use this bot.");
             console.log(`Unauthorized command attempt by user ID: ${userId} (${msg.text}), chat ID: ${chatId}`);
             return;
         }
+        
+        // Send welcome message for first user
+        if (isFirstUser && userId) {
+            await this.sendMessageWithRetry(chatId, `🎉 Welcome! You are now the authorized user for this bot (User ID: ${userId}).\n\nUse /settings to configure and start the bot.`);
+        }
+        
         try {
             await handler.call(this, msg);
         } catch (error) {
@@ -167,8 +188,8 @@ Other commands:
 
 **IMPORTANT:**
 - Ensure your main wallet (from \`.env\`) is funded.
-- Set \`TELEGRAM_ALLOWED_USER_IDS\` in \`.env\` to restrict access.
-- The bot creates \`wallets.json\` and \`lut.json\`. Do not edit them manually unless you know what you're doing.`;
+- The first user to interact with the bot will be automatically authorized.
+- The bot creates \`wallets.json\`, \`lut.json\`, and \`telegram_user_id.json\`. Do not edit them manually unless you know what you're doing.`;
 
         const keyboard: TelegramBot.InlineKeyboardMarkup = {
             inline_keyboard: [
@@ -291,7 +312,7 @@ Other commands:
                     this.bot.once('message', async (responseMsg) => {
                         if (responseMsg.chat.id === chatId && this.isUserAllowed(responseMsg.from?.id)) {
                             const amount = parseFloat(responseMsg.text || '');
-                            if (!isNaN(amount) && amount > 0.004 && amount < 10) {
+                            if (!isNaN(amount) && amount > 0.00004 && amount < 100) {
                                 this.config.solAmount = amount;
                                 await this.sendMessageWithRetry(chatId, `✅ SOL amount set to ${amount}`);
                             } else {
@@ -607,6 +628,9 @@ Other commands:
             ? `${this.config.tokenAddress.substring(0, 6)}...${this.config.tokenAddress.substring(this.config.tokenAddress.length - 4)}`
             : 'Not set';
 
+        const capturedUserId = getCapturedUserId();
+        const authorizedUserDisplay = capturedUserId ? `User ID: ${capturedUserId}` : "No user authorized yet";
+        
         const status = `🤖 **Bot Status & Config** 🤖
 -----------------------------------
 - Running: ${this.config.isRunning ? '✅ Active' : '❌ Idle'}
@@ -615,7 +639,7 @@ Other commands:
 - Slippage: \`${(this.config.slippage * 100).toFixed(1)}%\`
 - Cycle Sleep: \`${this.config.sleepTime}ms\`
 - Main Wallet: \`${mainWalletSol}\`
-- Authorized Users: \`${TELEGRAM_ALLOWED_USER_IDS.join(', ') || "ANYONE (CRITICAL SECURITY RISK!)"}\`
+- Authorized User: \`${authorizedUserDisplay}\`
 -----------------------------------`;
         await this.sendMessageWithRetry(chatId, status, { parse_mode: "Markdown" });
     }

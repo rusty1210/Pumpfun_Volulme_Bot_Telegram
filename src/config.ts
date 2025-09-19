@@ -25,18 +25,61 @@ if (!process.env.TELEGRAM_BOT_TOKEN) {
 }
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
+// Auto-capture first user ID functionality
+let capturedUserId: number | null = null;
+const USER_ID_FILE = 'telegram_user_id.json';
+
+// Function to load captured user ID from file
+export function loadCapturedUserId(): number | null {
+    try {
+        if (require('fs').existsSync(USER_ID_FILE)) {
+            const data = require('fs').readFileSync(USER_ID_FILE, 'utf8');
+            const parsed = JSON.parse(data);
+            capturedUserId = parsed.userId;
+            console.log(`Loaded captured Telegram user ID: ${capturedUserId}`);
+            return capturedUserId;
+        }
+    } catch (error) {
+        console.error("Error loading captured user ID:", error);
+    }
+    return null;
+}
+
+// Function to save captured user ID to file
+export function saveCapturedUserId(userId: number): void {
+    try {
+        const data = JSON.stringify({ userId, timestamp: new Date().toISOString() });
+        require('fs').writeFileSync(USER_ID_FILE, data);
+        capturedUserId = userId;
+        console.log(`Captured and saved Telegram user ID: ${userId}`);
+    } catch (error) {
+        console.error("Error saving captured user ID:", error);
+    }
+}
+
+// Function to get current captured user ID
+export function getCapturedUserId(): number | null {
+    return capturedUserId;
+}
+
+// Load user ID on startup
+loadCapturedUserId();
+
+// Legacy support for manual user ID setting (optional)
 const rawAllowedUserIds = process.env.TELEGRAM_ALLOWED_USER_IDS || "";
-export const TELEGRAM_ALLOWED_USER_IDS = rawAllowedUserIds
+const manualUserIds = rawAllowedUserIds
     .split(',')
     .map(id => parseInt(id.trim(), 10))
     .filter(id => !isNaN(id) && id > 0);
 
-if (TELEGRAM_ALLOWED_USER_IDS.length === 0 && process.env.NODE_ENV !== 'development_open') {
-    console.error("CRITICAL SECURITY WARNING: TELEGRAM_ALLOWED_USER_IDS is not set or is invalid in .env. The Telegram bot will be open to anyone. THIS IS A HUGE SECURITY RISK. Set TELEGRAM_ALLOWED_USER_IDS or run with NODE_ENV=development_open if this is intentional for local testing ONLY.");
-} else if (TELEGRAM_ALLOWED_USER_IDS.length > 0) {
-    console.log("Telegram bot access restricted to user IDs:", TELEGRAM_ALLOWED_USER_IDS);
-} else if (process.env.NODE_ENV === 'development_open') {
-    console.warn("WARNING: Bot is running in open mode due to NODE_ENV=development_open. Ensure this is for local development only.");
+if (manualUserIds.length > 0) {
+    console.log("Manual Telegram user IDs from .env:", manualUserIds);
+    if (capturedUserId === null) {
+        capturedUserId = manualUserIds[0];
+        saveCapturedUserId(capturedUserId);
+    }
+} else if (capturedUserId === null) {
+    console.log("No Telegram user ID configured. The first user to interact with the bot will be automatically authorized.");
 }
 
 
