@@ -9,61 +9,28 @@ import {
   TransactionMessage,
   VersionedTransaction,
   ComputeBudgetProgram,
+  Connection,
 } from "@solana/web3.js";
 import * as spl from "@solana/spl-token";
 import bs58 from "bs58";
-
-import {
-  GLOBAL,
-  FEE_RECIPIENT,
-  FEE_VAULT,
-  SYSTEM_PROGRAM_ID,
-  RENT,
-  PUMP_FUN_ACCOUNT,
-  PUMP_FUN_PROGRAM,
-  ASSOC_TOKEN_ACC_PROG,
-  MAX_LIMIT,
-} from "./src/constants";
-
-import { JitoBundleService, tipAccounts } from "./src/jito.bundle";
-
-import { handleWalletBalance } from 'jito-bundle-tip-service';
-
-
-
-import {
-  bufferFromUInt64,
-  chunkArray,
-  readBigUintLE,
-  sleepTime,
-} from "./src/utils";
-import {
-  connection,
-  DefaultDistributeAmountLamports,
-  DefaultJitoTipAmountLamports,
-  userKeypair,
-  DefaultSlippage,
-  DefaultCA,
-} from "./src/config";
+import { PumpSwapSDK } from "./src/pumpswap";
+import { getPumpSwapPool, getPoolReserves, getPrice } from "./src/pool";
+import { connection, userKeypair } from "./src/config";
+import { logger } from "./src/utils/logger";
 import fs from "fs";
 import base58 from "bs58";
-import { bool, publicKey, struct, u64 } from "@raydium-io/raydium-sdk";
 
 const WALLETS_JSON = "wallets.json";
 const LUT_JSON = "./lut.json";
 
 const FEE_ATA_LAMPORTS = 2039280;
 
-export class PumpfunVbot {
+export class PerfectPumpfunVolumeBot {
   slippage: number;
   mint: PublicKey;
-  creator!: PublicKey;
-  bondingCurve!: PublicKey;
-  associatedBondingCurve!: PublicKey;
-  virtualTokenReserves!: number;
-  virtualSolReserves!: number;
+  poolAddress!: PublicKey;
   keypairs!: Keypair[];
-  jitoBundleInstance: JitoBundleService;
+  pumpswapSDK: PumpSwapSDK;
   lookupTableAccount!: AddressLookupTableAccount;
   distributeAmountLamports: number;
   jitoTipAmountLamports: number;
@@ -73,100 +40,50 @@ export class PumpfunVbot {
     customDistributeAmountLamports?: number,
     customSlippage?: number
   ) {
-    this.slippage = customSlippage || DefaultSlippage;
+    this.slippage = customSlippage || 0.5;
     this.mint = new PublicKey(CA);
-    this.jitoBundleInstance = new JitoBundleService();
-    this.distributeAmountLamports =
-      customDistributeAmountLamports || DefaultDistributeAmountLamports;
-    this.jitoTipAmountLamports = DefaultJitoTipAmountLamports;
+    this.pumpswapSDK = new PumpSwapSDK(connection);
+    this.distributeAmountLamports = customDistributeAmountLamports || 0.004 * LAMPORTS_PER_SOL;
+    this.jitoTipAmountLamports = 1000000; // 0.001 SOL
 
     if (this.slippage <= 0 || this.slippage > 0.5) {
-      console.warn(`Warning: Slippage is set to ${this.slippage * 100}%. Recommended range is 0.1% to 50%.`);
+      logger.warn(`Warning: Slippage is set to ${this.slippage * 100}%. Recommended range is 0.1% to 50%.`);
     }
   }
 
   async getPumpData() {
-    console.log("\n- Getting pump data...");
+    console.log("🔍 [BOT] Getting pump data for token:", this.mint.toBase58());
     try {
       const tokenAccount = await connection.getAccountInfo(this.mint);
       if (!tokenAccount) {
         throw new Error("Invalid token address: Token account does not exist");
       }
+      console.log("✅ [BOT] Token account verified");
 
-      const mint_account = this.mint.toBuffer();
-      const [bondingCurve] = PublicKey.findProgramAddressSync(
-        [Buffer.from("bonding-curve"), mint_account],
-        PUMP_FUN_PROGRAM
-      );
-      this.bondingCurve = bondingCurve;
-      const accountInfo = await connection.getAccountInfo(bondingCurve);
-      if (!accountInfo) {
-        throw new Error("Bonding curve account not found");
-      }
+      // Get the actual pool address using the correct method
+      console.log("🏊 [BOT] Finding PumpSwap pool...");
+      this.poolAddress = await getPumpSwapPool(this.mint, connection);
+      console.log("✅ [BOT] Pool found:", this.poolAddress.toBase58());
+      
+      // Get real-time pool data
+      console.log("📊 [BOT] Fetching pool reserves...");
+      const reserves = await getPoolReserves(this.mint, connection);
+      const price = await getPrice(this.mint, connection);
 
-      const structure = struct([
-        u64("discriminator"),
-        u64("virtualTokenReserves"),
-        u64("virtualSolReserves"),
-        u64("realTokenReserves"),
-        u64("realSolReserves"),
-        u64("tokenTotalSupply"),
-        bool("complete"),
-        publicKey("creator"),
-      ]);
-      const decoded = structure.decode(accountInfo.data);
-      this.creator = decoded.creator;
-      if (decoded.virtualSolReserves.toNumber() === 0 || decoded.virtualTokenReserves.toNumber() === 0) {
-        return null;
-      }
-      const bondingCurveAccount = await connection.getAccountInfo(bondingCurve);
-      if (!bondingCurveAccount) {
-        throw new Error(
-          "This token is not a Pump.fun token: Bonding curve account not found"
-        );
-      }
-
-      const [associatedBondingCurve] = PublicKey.findProgramAddressSync(
-        [
-          bondingCurve.toBuffer(),
-          spl.TOKEN_PROGRAM_ID.toBuffer(),
-          this.mint.toBuffer(),
-        ],
-        spl.ASSOCIATED_TOKEN_PROGRAM_ID
-      );
-      this.associatedBondingCurve = associatedBondingCurve;
-
-      const assocBondingCurveAccount = await connection.getAccountInfo(
-        associatedBondingCurve
-      );
-      if (!assocBondingCurveAccount) {
-        throw new Error("Associated bonding curve account not found");
-      }
-
-      const PUMP_CURVE_STATE_OFFSETS = {
-        VIRTUAL_TOKEN_RESERVES: 0x08,
-        VIRTUAL_SOL_RESERVES: 0x10,
-      };
-
-      this.virtualTokenReserves = readBigUintLE(
-        bondingCurveAccount.data,
-        PUMP_CURVE_STATE_OFFSETS.VIRTUAL_TOKEN_RESERVES,
-        8
-      );
-      this.virtualSolReserves = readBigUintLE(
-        bondingCurveAccount.data,
-        PUMP_CURVE_STATE_OFFSETS.VIRTUAL_SOL_RESERVES,
-        8
-      );
+      console.log("🏊 [BOT] Pool address:", this.poolAddress.toBase58());
+      console.log("💰 [BOT] Pool reserves:", JSON.stringify(reserves));
+      console.log("💲 [BOT] Current price:", price);
+      console.log("✅ [BOT] Pump data loaded successfully!");
 
     } catch (error: any) {
-      console.error("Error getting pump data:", error.message);
+      console.error("❌ [BOT] Error getting pump data:", error.message);
+      console.error("🔍 [BOT] Full error:", error);
       throw new Error("Failed to get pump data. Please check token address and RPC.");
     }
   }
 
   createWallets(total = 10) {
-    console.log(`\n- Creating ${total} new wallets...`);
+    logger.info(`Creating ${total} new wallets...`);
     const pks = [];
     for (let i = 0; i < total; i++) {
       const wallet = Keypair.generate();
@@ -175,15 +92,15 @@ export class PumpfunVbot {
     fs.writeFileSync(WALLETS_JSON, JSON.stringify(pks, null, 2));
     try {
       fs.chmodSync(WALLETS_JSON, 0o400);
-      console.log(`Created ${WALLETS_JSON} and set permissions to read-only for owner.`);
+      logger.info(`Created ${WALLETS_JSON} and set permissions to read-only for owner.`);
     } catch (chmodError) {
-      console.warn(`Could not set permissions for ${WALLETS_JSON} (this might happen on Windows):`, chmodError);
+      logger.warn(`Could not set permissions for ${WALLETS_JSON} (this might happen on Windows): ${chmodError}`);
     }
   }
 
   loadWallets(total = 10) {
     if (!fs.existsSync(WALLETS_JSON)) {
-      console.log(`${WALLETS_JSON} not found. Creating new wallets.`);
+      logger.info(`${WALLETS_JSON} not found. Creating new wallets.`);
       this.createWallets(total);
     }
     const keypairs = [];
@@ -195,12 +112,12 @@ export class PumpfunVbot {
     }
 
     if (keypairs.length <= 0) throw new Error("No wallets loaded or found. Create wallets.json first or ensure it's not empty.");
-    console.log(`- ${keypairs.length} wallets are loaded`);
+    logger.info(`${keypairs.length} wallets are loaded`);
     this.keypairs = keypairs;
   }
 
   async collectSOL() {
-    console.log("\n- Collecting SOL from sub-wallets...");
+    logger.info("Collecting SOL from sub-wallets...");
     if (!this.keypairs || this.keypairs.length === 0) {
       throw new Error("No wallets loaded to collect SOL from.");
     }
@@ -210,6 +127,7 @@ export class PumpfunVbot {
         throw new Error("Lookup table not loaded and could not be loaded. Please create LUT first.");
       }
     }
+    
     let remainKeypairs = [];
     for (const keypair of this.keypairs) {
       const solBalance = await connection.getBalance(keypair.publicKey);
@@ -218,8 +136,10 @@ export class PumpfunVbot {
       }
     }
     this.keypairs = remainKeypairs;
-    const chunkedKeypairs = chunkArray(this.keypairs, 8);
+    
+    const chunkedKeypairs = this.chunkArray(this.keypairs, 8);
     const rawTxns = [];
+    
     for (let i = 0; i < chunkedKeypairs.length; i++) {
       const keypairsInChunk = chunkedKeypairs[i];
       const instructions: TransactionInstruction[] = [];
@@ -230,7 +150,6 @@ export class PumpfunVbot {
           const amountToTransfer = (keypair.publicKey.equals(userKeypair.publicKey))
             ? 0
             : solBalance;
-
 
           if (amountToTransfer > 0) {
             const transferIns = SystemProgram.transfer({
@@ -243,29 +162,7 @@ export class PumpfunVbot {
         }
       }
 
-      // if (instructions.length === 0 && i < chunkedKeypairs.length - 1) continue;
-
-
-      // const isLastTxnForBundle = i === chunkedKeypairs.length - 1;
-      // if (isLastTxnForBundle && instructions.length > 0) {
-      //   const jitoTipIns = SystemProgram.transfer({
-      //     fromPubkey: userKeypair.publicKey,
-      //     toPubkey: new PublicKey(tipAccounts[0]),
-      //     lamports: this.jitoTipAmountLamports,
-      //   });
-      //   instructions.push(jitoTipIns);
-      // } else if (isLastTxnForBundle && instructions.length === 0 && this.jitoTipAmountLamports > 0) {
-      //   const jitoTipIns = SystemProgram.transfer({
-      //     fromPubkey: userKeypair.publicKey,
-      //     toPubkey: new PublicKey(tipAccounts[0]),
-      //     lamports: this.jitoTipAmountLamports,
-      //   });
-      //   instructions.push(jitoTipIns);
-      // }
-
-
       if (instructions.length === 0) continue;
-
 
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
       const messageV0 = new TransactionMessage({
@@ -284,59 +181,33 @@ export class PumpfunVbot {
       vTxn.sign([userKeypair, ...signers]);
 
       const rawTxn = vTxn.serialize();
-      console.log("Collect SOL Txn length:", rawTxn.length);
+      logger.info(`Collect SOL Txn length: ${rawTxn.length}`);
       if (rawTxn.length > 1232) {
-        console.error("Collect SOL Transaction too large, trying smaller chunks might be needed.");
+        logger.error("Collect SOL Transaction too large, trying smaller chunks might be needed.");
         continue;
       }
 
       try {
-        const { value: simulatedTransactionResponse } =
-          await connection.simulateTransaction(vTxn, {
-            sigVerify: false,
-            replaceRecentBlockhash: true,
-            commitment: 'confirmed'
-          });
-        const { err, logs } = simulatedTransactionResponse;
-
-        console.log("🚀 Simulate Collect SOL ~", Date.now());
-        if (err) {
-          console.error("Collect SOL Simulation Failed:", { err, logs });
-          continue;
-        }
-        // rawTxns.push(rawTxn);
         const sig = await connection.sendRawTransaction(rawTxn, {
           skipPreflight: true,
           maxRetries: 3,
           preflightCommitment: 'confirmed'
         });
-        console.log("Sent regular SOL collection tx:", sig);
+        logger.info(`Sent regular SOL collection tx: ${sig}`);
       } catch (simError: any) {
-        console.error("Error during Collect SOL simulation:", simError.message);
+        logger.error(`Error during Collect SOL: ${simError.message}`);
         continue;
       }
     }
-
-    // if (rawTxns.length > 0) {
-    //   console.log(`Sending ${rawTxns.length} transactions in a bundle to collect SOL...`);
-    //   const bundleId = await this.jitoBundleInstance.sendBundle(rawTxns);
-    //   if (bundleId) {
-    //     await this.jitoBundleInstance.getBundleStatus(bundleId);
-    //   } else {
-    //     console.error("Failed to send SOL collection bundle.");
-    //   }
-    // } else {
-    //   console.log("No SOL to collect or no valid transactions created.");
-    // }
   }
 
   async distributeSOL() {
-    console.log("\n- Distributing SOL to sub-wallets...");
+    logger.info("Distributing SOL to sub-wallets...");
     if (this.distributeAmountLamports <= FEE_ATA_LAMPORTS) {
-      console.error(
-        `Distribute SOL amount per wallet should be larger than ${(
-          FEE_ATA_LAMPORTS / LAMPORTS_PER_SOL
-        ).toFixed(5)} SOL to cover potential fees.`
+      logger.error(
+        `Distribute SOL amount per wallet should be larger than ${
+          (FEE_ATA_LAMPORTS / LAMPORTS_PER_SOL).toFixed(5)
+        } SOL to cover potential fees.`
       );
       throw new Error("Distribution amount too low.");
     }
@@ -352,35 +223,31 @@ export class PumpfunVbot {
 
     const walletsToDistribute = this.keypairs.filter(kp => !kp.publicKey.equals(userKeypair.publicKey));
     if (walletsToDistribute.length === 0) {
-      console.log("No sub-wallets (excluding main wallet) to distribute SOL to.");
+      logger.info("No sub-wallets (excluding main wallet) to distribute SOL to.");
       return;
     }
-    const totalSolRequired: number =
-      this.distributeAmountLamports * walletsToDistribute.length + this.jitoTipAmountLamports;
+    
+    const totalSolRequired: number = this.distributeAmountLamports * walletsToDistribute.length + this.jitoTipAmountLamports;
 
     const instructions: TransactionInstruction[] = [];
     const solBal = await connection.getBalance(userKeypair.publicKey);
-    
-    // TODO: Implement SOL distribution logic here
-    // This was previously handled by handleSolDistribution function
     if (solBal < totalSolRequired) {
-      console.error(
-        `Insufficient SOL balance. Need ${totalSolRequired / LAMPORTS_PER_SOL} SOL, have ${solBal / LAMPORTS_PER_SOL} SOL.`
+      logger.error(
+        `Insufficient SOL balance in main wallet: Need ${
+          (totalSolRequired / LAMPORTS_PER_SOL).toFixed(5)
+        } SOL, have ${(solBal / LAMPORTS_PER_SOL).toFixed(5)} SOL`
       );
-      throw new Error("Insufficient SOL balance for distribution.");
+      throw new Error("Insufficient SOL in main wallet for distribution.");
     }
 
-    // Add transfer instructions for each wallet
-    for (const wallet of walletsToDistribute) {
-      instructions.push(
-        SystemProgram.transfer({
-          fromPubkey: userKeypair.publicKey,
-          toPubkey: wallet.publicKey,
-          lamports: this.distributeAmountLamports,
-        })
-      );
+    for (const keypair of walletsToDistribute) {
+      const transferIns = SystemProgram.transfer({
+        fromPubkey: userKeypair.publicKey,
+        toPubkey: keypair.publicKey,
+        lamports: this.distributeAmountLamports,
+      });
+      instructions.push(transferIns);
     }
-
 
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
     const messageV0 = new TransactionMessage({
@@ -392,7 +259,7 @@ export class PumpfunVbot {
     const vTxn = new VersionedTransaction(messageV0);
     vTxn.sign([userKeypair]);
     const rawTxn = vTxn.serialize();
-    console.log("Distribute SOL Txn length:", rawTxn.length);
+    logger.info(`Distribute SOL Txn length: ${rawTxn.length}`);
     if (rawTxn.length > 1232) {
       throw new Error("Distribute SOL transaction too large. Try reducing number of wallets or use multiple transactions.");
     }
@@ -403,34 +270,33 @@ export class PumpfunVbot {
         maxRetries: 3,
         preflightCommitment: 'confirmed'
       });
-      console.log("Sent regular SOL distribution tx:", sig);
+      logger.info(`Sent regular SOL distribution tx: ${sig}`);
       const confirmation = await connection.confirmTransaction({
         signature: sig,
         blockhash: blockhash,
         lastValidBlockHeight: lastValidBlockHeight
       }, "confirmed");
     } catch (e: any) {
-      console.error("Error distributing SOL:", e.message);
+      logger.error(`Error distributing SOL: ${e.message}`);
       throw new Error("Failed to distribute SOL.");
     }
   }
 
   async createLUT() {
     try {
-      console.log("\n- Creating new lookup table...");
+      logger.info("Creating new lookup table...");
       const solBalance = await connection.getBalance(userKeypair.publicKey);
       const estimatedCost = 0.0025 * LAMPORTS_PER_SOL + this.jitoTipAmountLamports;
 
       if (solBalance < estimatedCost) {
         throw new Error(
-          `Insufficient SOL balance. Need at least ${estimatedCost / LAMPORTS_PER_SOL} SOL for LUT creation. Current balance: ${solBalance / LAMPORTS_PER_SOL
-          } SOL`
+          `Insufficient SOL balance. Need at least ${estimatedCost / LAMPORTS_PER_SOL} SOL for LUT creation. Current balance: ${solBalance / LAMPORTS_PER_SOL} SOL`
         );
       }
 
       let slot = await connection.getSlot("finalized");
       slot = slot > 20 ? slot - 20 : slot;
-      console.log("Using slot for LUT creation:", slot);
+      logger.info(`Using slot for LUT creation: ${slot}`);
 
       const [createTi, lutAddress] = AddressLookupTableProgram.createLookupTable({
         authority: userKeypair.publicKey,
@@ -438,72 +304,42 @@ export class PumpfunVbot {
         recentSlot: slot,
       });
 
-      const jitoTipIns = SystemProgram.transfer({
-        fromPubkey: userKeypair.publicKey,
-        toPubkey: new PublicKey(tipAccounts[0]),
-        lamports: this.jitoTipAmountLamports,
-      });
-
       let { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
       const messageV0 = new TransactionMessage({
         payerKey: userKeypair.publicKey,
         recentBlockhash: blockhash,
-        instructions: [createTi, jitoTipIns],
+        instructions: [createTi],
       }).compileToV0Message();
 
       const vTxn = new VersionedTransaction(messageV0);
       vTxn.sign([userKeypair]);
       const rawTxn = vTxn.serialize();
 
-      console.log("Create LUT Txn length:", rawTxn.length);
+      logger.info(`Create LUT Txn length: ${rawTxn.length}`);
       if (rawTxn.length > 1232) throw new Error("Create LUT transaction too large");
 
-      const { value: simulatedTransactionResponse } =
-        await connection.simulateTransaction(vTxn, {
-          sigVerify: false,
-          replaceRecentBlockhash: true,
-          commitment: 'confirmed'
-        });
-      const { err, logs } = simulatedTransactionResponse;
-      console.log("🚀 Simulate Create LUT ~", Date.now());
-      if (err) {
-        console.error("Create LUT Simulation Failed:", { err, logs });
-        throw new Error(`Simulation Failed for LUT creation: ${JSON.stringify(err)}`);
+      const sig = await connection.sendTransaction(vTxn, { skipPreflight: true });
+      logger.info(`Sent regular LUT creation tx: ${sig}`);
+      const confirmation = await connection.confirmTransaction({
+        signature: sig,
+        blockhash: blockhash,
+        lastValidBlockHeight: lastValidBlockHeight
+      }, "confirmed");
+      if (confirmation.value.err) {
+        throw new Error(`Regular LUT creation transaction failed confirmation: ${JSON.stringify(confirmation.value.err)}`);
       }
-
-
-      const bundleId = await this.jitoBundleInstance.sendBundle([rawTxn]);
-      let success = false;
-      if (bundleId) {
-        success = await this.jitoBundleInstance.getBundleStatus(bundleId);
-      }
-
-      if (!success) {
-        console.log("Jito bundle for LUT creation failed or not confirmed, trying regular transaction...");
-        ({ blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash());
-        const sig = await connection.sendTransaction(vTxn, { skipPreflight: true });
-        console.log("Sent regular LUT creation tx:", sig);
-        const confirmation = await connection.confirmTransaction({
-          signature: sig,
-          blockhash: blockhash,
-          lastValidBlockHeight: lastValidBlockHeight
-        }, "confirmed");
-        if (confirmation.value.err) {
-          throw new Error(`Regular LUT creation transaction failed confirmation: ${JSON.stringify(confirmation.value.err)}`);
-        }
-        console.log("Regular LUT creation transaction confirmed:", sig);
-      }
+      logger.info(`Regular LUT creation transaction confirmed: ${sig}`);
 
       fs.writeFileSync(LUT_JSON, JSON.stringify(lutAddress.toBase58()));
       try {
         fs.chmodSync(LUT_JSON, 0o600);
-        console.log(`Created ${LUT_JSON} and set permissions.`);
+        logger.info(`Created ${LUT_JSON} and set permissions.`);
       } catch (chmodError) {
-        console.warn(`Could not set permissions for ${LUT_JSON}:`, chmodError);
+        logger.warn(`Could not set permissions for ${LUT_JSON}: ${chmodError}`);
       }
 
-      console.log("Waiting for LUT to be confirmed and retrievable...");
-      await sleepTime(25000);
+      logger.info("Waiting for LUT to be confirmed and retrievable...");
+      await this.sleepTime(25000);
 
       const lutAccount = await connection.getAddressLookupTable(lutAddress);
       if (!lutAccount.value) {
@@ -512,17 +348,17 @@ export class PumpfunVbot {
         );
       }
       this.lookupTableAccount = lutAccount.value;
-      console.log("LUT created successfully:", lutAddress.toBase58());
+      logger.info(`LUT created successfully: ${lutAddress.toBase58()}`);
 
     } catch (e: any) {
-      console.error("Error creating LUT:", e.message);
+      logger.error(`Error creating LUT: ${e.message}`);
       throw new Error(`Failed to create Lookup Table.`);
     }
   }
 
   async extendLUT() {
     try {
-      console.log("\n- Extending lookup table...");
+      logger.info("Extending lookup table...");
       if (!fs.existsSync(LUT_JSON)) {
         throw new Error(
           "LUT.json not found. Please create LUT first using the bot or manually."
@@ -531,7 +367,7 @@ export class PumpfunVbot {
 
       const lutAddressString = JSON.parse(fs.readFileSync(LUT_JSON, "utf8"));
       const lutPubkey = new PublicKey(lutAddressString);
-      console.log("Extending LUT:", lutPubkey.toBase58());
+      logger.info(`Extending LUT: ${lutPubkey.toBase58()}`);
 
       const lutAccountCheck = await connection.getAddressLookupTable(lutPubkey);
       if (!lutAccountCheck.value) {
@@ -544,12 +380,12 @@ export class PumpfunVbot {
       if (!this.keypairs || this.keypairs.length === 0) {
         this.loadWallets();
       }
-      if (!this.mint || !this.bondingCurve) {
+      if (!this.mint || !this.poolAddress) {
         await this.getPumpData();
-        if (!this.mint || !this.bondingCurve) throw new Error("Cannot extend LUT: Mint CA or bonding curve data not loaded.");
+        if (!this.mint || !this.poolAddress) throw new Error("Cannot extend LUT: Mint CA or pool data not loaded.");
       }
 
-      console.log(`Preparing to add up to ${this.keypairs.length} sub-wallets and their ATAs to LUT.`);
+      logger.info(`Preparing to add up to ${this.keypairs.length} sub-wallets and their ATAs to LUT.`);
 
       const ataTokenPayer = await spl.getAssociatedTokenAddress(
         this.mint,
@@ -563,9 +399,8 @@ export class PumpfunVbot {
       let accountsToAddSet = new Set<string>();
 
       [userKeypair.publicKey, ataTokenPayer, ataWSOLPayer, this.mint,
-      this.bondingCurve, this.associatedBondingCurve, RENT, GLOBAL, FEE_RECIPIENT,
-        SYSTEM_PROGRAM_ID, ASSOC_TOKEN_ACC_PROG, spl.TOKEN_PROGRAM_ID, PUMP_FUN_ACCOUNT,
-        PUMP_FUN_PROGRAM, ...tipAccounts.map(ta => new PublicKey(ta))
+      this.poolAddress, spl.NATIVE_MINT, SystemProgram.programId, 
+      spl.TOKEN_PROGRAM_ID, spl.ASSOCIATED_TOKEN_PROGRAM_ID
       ].forEach(acc => accountsToAddSet.add(acc.toBase58()));
 
       for (const keypair of this.keypairs) {
@@ -586,7 +421,7 @@ export class PumpfunVbot {
       let finalAccountsToAdd = Array.from(accountsToAddSet).filter(accB58 => !existingAddresses.has(accB58)).map(b58 => new PublicKey(b58));
 
       if (finalAccountsToAdd.length === 0) {
-        console.log("No new unique accounts to add to the LUT.");
+        logger.info("No new unique accounts to add to the LUT.");
         return;
       }
 
@@ -595,18 +430,16 @@ export class PumpfunVbot {
       const remainingSlots = 256 - currentLength;
 
       if (remainingSlots <= 0) {
-        console.log("LUT is already at maximum capacity (256 addresses). Cannot add more addresses.");
+        logger.info("LUT is already at maximum capacity (256 addresses). Cannot add more addresses.");
         return;
       }
 
       // Only add up to the remaining slots
       finalAccountsToAdd = finalAccountsToAdd.slice(0, remainingSlots);
-      console.log(`Found ${finalAccountsToAdd.length} new unique accounts to add to LUT (${remainingSlots} slots remaining).`);
+      logger.info(`Found ${finalAccountsToAdd.length} new unique accounts to add to LUT (${remainingSlots} slots remaining).`);
 
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-      const rawTxnsForBundle: Uint8Array[] = [];
-      // Reduce chunk size to ensure we don't exceed limits
-      const accountChunks = chunkArray(finalAccountsToAdd, 10);
+      const accountChunks = this.chunkArray(finalAccountsToAdd, 10);
 
       for (let i = 0; i < accountChunks.length; i++) {
         const chunk = accountChunks[i];
@@ -617,349 +450,19 @@ export class PumpfunVbot {
           addresses: chunk,
         });
 
-        const instructions: TransactionInstruction[] = [extendIx];
-        if (i === accountChunks.length - 1) {
-          instructions.push(
-            SystemProgram.transfer({
-              fromPubkey: userKeypair.publicKey,
-              toPubkey: new PublicKey(tipAccounts[0]),
-              lamports: this.jitoTipAmountLamports,
-            }));
-        }
-
         const messageV0 = new TransactionMessage({
           payerKey: userKeypair.publicKey,
           recentBlockhash: blockhash,
-          instructions: instructions,
+          instructions: [extendIx],
         }).compileToV0Message();
 
         const vTxn = new VersionedTransaction(messageV0);
         vTxn.sign([userKeypair]);
         const rawTxnItem = vTxn.serialize();
         if (rawTxnItem.length > 1232) {
-          console.error("Extend LUT transaction too large. Chunk: ", i);
+          logger.error(`Extend LUT transaction too large. Chunk: ${i}`);
           continue;
         }
-
-
-        const { value: simulatedTransactionResponse } =
-          await connection.simulateTransaction(vTxn, {
-            sigVerify: false,
-            replaceRecentBlockhash: true,
-            commitment: 'confirmed'
-          });
-        const { err, logs } = simulatedTransactionResponse;
-        console.log("🚀 Simulate Extend LUT ~", Date.now());
-        if (err) {
-          console.error("Extend LUT Simulation Failed for chunk", i, { err, logs });
-          continue;
-        }
-
-        const encodedSignedTxns = [bs58.encode(rawTxnItem)];
-
-        try {
-          const jitoResponse = await fetch(
-            `https://tokyo.mainnet.block-engine.jito.wtf/api/v1/bundles`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                jsonrpc: "2.0",
-                id: 1,
-                method: "sendBundle",
-                params: [encodedSignedTxns],
-              }),
-            }
-          );
-          if (jitoResponse.status === 200) {
-            console.log("bundle sent successfully", jitoResponse.status);
-          } else {
-            console.log(
-              "bundle failed, please check the parameters",
-              jitoResponse
-            );
-          }
-        } catch (e: any) {
-          console.error(e.message);
-        }
-
-      }
-
-    } catch (e: any) {
-      console.error("Error extending LUT:", e.message);
-      throw new Error(`Failed to extend Lookup Table.`);
-    }
-  }
-
-  async loadLUT() {
-    console.log("\n- Loading lookup table...");
-    if (!fs.existsSync(LUT_JSON)) {
-      console.warn(
-        `${LUT_JSON} not found. Bot will attempt to create one if needed.`
-      );
-      this.lookupTableAccount = undefined!;
-      return;
-    }
-    const lutAddressString = JSON.parse(fs.readFileSync(LUT_JSON, "utf8"));
-    if (!lutAddressString) {
-      console.error("LUT address in lut.json is empty or invalid.");
-      this.lookupTableAccount = undefined!;
-      return;
-    }
-    console.log("LUT address from file:", lutAddressString);
-    const lutPubkey = new PublicKey(lutAddressString);
-
-    const lookupTableAccountResult = await connection.getAddressLookupTable(
-      lutPubkey
-    );
-
-    if (lookupTableAccountResult.value === null) {
-      console.error(`Lookup table account ${lutPubkey.toBase58()} not found on-chain!`);
-      this.lookupTableAccount = undefined!;
-      return;
-    }
-    this.lookupTableAccount = lookupTableAccountResult.value;
-    console.log("Lookup table loaded successfully. Last extended slot:", this.lookupTableAccount.state.lastExtendedSlot);
-  }
-
-  async swap() {
-    try {
-      console.log("\n- Performing BUY/SELL swap cycle...");
-      if (!this.keypairs || this.keypairs.length === 0) throw new Error("Wallets not loaded.");
-      if (!this.lookupTableAccount) {
-        await this.loadLUT();
-        if (!this.lookupTableAccount) throw new Error("LUT not loaded and could not be loaded.");
-      }
-      if (!this.mint || !this.bondingCurve || !this.associatedBondingCurve) {
-        await this.getPumpData();
-        if (!this.mint || !this.bondingCurve) throw new Error("Pump data could not be loaded.");
-      }
-
-
-      const chunkedKeypairs = chunkArray(this.keypairs, 3);
-      const rawTxns: Uint8Array[] = [];
-
-      for (let i = 0; i < chunkedKeypairs.length; i++) {
-        const keypairsInChunk = chunkedKeypairs[i];
-        const instructions: TransactionInstruction[] = [];
-
-        const payerKeypair = keypairsInChunk[0];
-
-        for (const keypair of keypairsInChunk) {
-          const tokenATA = spl.getAssociatedTokenAddressSync(
-            this.mint,
-            keypair.publicKey,
-            true
-          );
-
-          const splAta = spl.getAssociatedTokenAddressSync(this.mint, keypair.publicKey, true);
-          const CREATOR_FEE_VAULT = PublicKey.findProgramAddressSync(
-            [Buffer.from("creator-vault"), this.creator.toBuffer()],
-            PUMP_FUN_PROGRAM
-          )[0];
-          const buyKeys = [
-            { pubkey: GLOBAL, isSigner: false, isWritable: false },
-            { pubkey: FEE_RECIPIENT, isSigner: false, isWritable: true },
-            { pubkey: this.mint, isSigner: false, isWritable: false },
-            {
-              pubkey: this.bondingCurve,
-              isSigner: false,
-              isWritable: true,
-            },
-            {
-              pubkey: this.associatedBondingCurve,
-              isSigner: false,
-              isWritable: true,
-            },
-            { pubkey: splAta, isSigner: false, isWritable: true },
-            { pubkey: keypair.publicKey, isSigner: false, isWritable: true },
-            { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
-            {
-              pubkey: spl.TOKEN_PROGRAM_ID,
-              isSigner: false,
-              isWritable: true,
-            },
-            {
-              pubkey: CREATOR_FEE_VAULT,
-              isSigner: false,
-              isWritable: true,
-            },
-            { pubkey: PUMP_FUN_ACCOUNT, isSigner: false, isWritable: false },
-            { pubkey: PUMP_FUN_PROGRAM, isSigner: false, isWritable: false },
-          ];
-
-          const sellKeys = [
-            { pubkey: GLOBAL, isSigner: false, isWritable: false },
-            { pubkey: FEE_RECIPIENT, isSigner: false, isWritable: true },
-            { pubkey: this.mint, isSigner: false, isWritable: false },
-            {
-              pubkey: this.bondingCurve,
-              isSigner: false,
-              isWritable: true,
-            },
-            {
-              pubkey: this.associatedBondingCurve,
-              isSigner: false,
-              isWritable: true,
-            },
-            { pubkey: splAta, isSigner: false, isWritable: true },
-            { pubkey: keypair.publicKey, isSigner: false, isWritable: true },
-            { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
-            {
-              pubkey: CREATOR_FEE_VAULT,
-              isSigner: false,
-              isWritable: true,
-            },
-            {
-              pubkey: spl.TOKEN_PROGRAM_ID,
-              isSigner: false,
-              isWritable: true,
-            },
-            { pubkey: PUMP_FUN_ACCOUNT, isSigner: false, isWritable: false },
-            { pubkey: PUMP_FUN_PROGRAM, isSigner: false, isWritable: false },
-          ];
-
-          const balanceResult = await handleWalletBalance({
-            keypair,
-            connection,
-            requiredForFees: FEE_ATA_LAMPORTS,
-            jitoTipAmountLamports: this.jitoTipAmountLamports,
-            payerKeypair,
-            currentIndex: i,
-            totalWallets: chunkedKeypairs.length,
-          });
-          if (balanceResult.shouldSkip) {
-            console.log(balanceResult.reason);
-            continue;
-          }
-
-          if (balanceResult.transferInstruction) {
-            instructions.push(balanceResult.transferInstruction);
-          } else if (balanceResult.availableForSwap) {
-            const availableForSwap = balanceResult.availableForSwap;
-            // Reduce the swap amount to 80% of available balance to account for fees and slippage
-            const solAmountForSwap = Math.floor(availableForSwap * (0.6 + Math.random() * 0.2));
-
-            if (solAmountForSwap <= 1000) {
-              console.log(`Skipping wallet ${keypair.publicKey.toBase58().substring(0, 5)}: Calculated SOL amount for swap too low (${solAmountForSwap} lamports).`);
-              continue;
-            }
-
-            // console.log(
-            //   ` Wallet ${keypair.publicKey.toBase58().substring(0, 5)} preparing to swap ${solAmountForSwap / LAMPORTS_PER_SOL} SOL / Avail: ${availableForSwap / LAMPORTS_PER_SOL} SOL`
-            // );
-
-            if (this.virtualSolReserves === 0) {
-              console.error("Virtual SOL reserves are zero. Cannot calculate token out. Skipping swap for wallet", keypair.publicKey.toBase58());
-              continue;
-            }
-            const estimatedTokenOut = Math.floor(
-              (solAmountForSwap * this.virtualTokenReserves) / this.virtualSolReserves
-            );
-            if (estimatedTokenOut <= 0) {
-              console.log("Estimated token out is 0, skipping swap for this amount for wallet", keypair.publicKey.toBase58());
-              continue;
-            }
-
-            const maxSolCost = Math.floor(solAmountForSwap * (1 + this.slippage));
-            const buyData = Buffer.concat([
-              bufferFromUInt64("16927863322537952870"),
-              bufferFromUInt64(estimatedTokenOut),
-              bufferFromUInt64(maxSolCost),
-            ]);
-
-            const minSolOutputFromSell = Math.floor(
-              (solAmountForSwap * (1 - this.slippage))
-
-            );
-            const sellData = Buffer.concat([
-              bufferFromUInt64("12502976635542562355"),
-              bufferFromUInt64(estimatedTokenOut),
-              bufferFromUInt64(minSolOutputFromSell),
-            ]);
-
-            instructions.push(
-              spl.createAssociatedTokenAccountIdempotentInstruction(
-                keypair.publicKey,
-                tokenATA,
-                keypair.publicKey,
-                this.mint
-              ),
-              new TransactionInstruction({ keys: buyKeys, programId: PUMP_FUN_PROGRAM, data: buyData }),
-              new TransactionInstruction({ keys: sellKeys, programId: PUMP_FUN_PROGRAM, data: sellData }),
-              spl.createCloseAccountInstruction(
-                tokenATA,
-                keypair.publicKey,
-                keypair.publicKey
-              )
-              // SystemProgram.transfer({
-              //   fromPubkey: keypair.publicKey,
-              //   toPubkey: new PublicKey(tipAccounts[1]),
-              //   lamports: this.jitoTipAmountLamports,
-              // })
-            );
-
-          }
-
-          if (instructions.length === 0) continue;
-        }
-        instructions.push(
-          ComputeBudgetProgram.setComputeUnitLimit({
-            units: 200000
-          }),
-          ComputeBudgetProgram.setComputeUnitPrice({
-            microLamports: 100000
-          }),
-        )
-
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-
-        const messageV0 = new TransactionMessage({
-          payerKey: payerKeypair.publicKey,
-          recentBlockhash: blockhash,
-          instructions,
-        }).compileToV0Message([this.lookupTableAccount]);
-
-        const vTxn = new VersionedTransaction(messageV0);
-
-        const signersForTxn = new Set<Keypair>([payerKeypair]);
-        keypairsInChunk.forEach(kp => {
-          if (instructions.some(ix => ix.keys.some(k => k.isSigner && k.pubkey.equals(kp.publicKey)))) {
-            signersForTxn.add(kp);
-          }
-        });
-        vTxn.sign(Array.from(signersForTxn));
-        // vTxn.sign([payerKeypair]);
-
-        const rawTxnItem = vTxn.serialize();
-
-        console.log("Swap Txn length:", rawTxnItem.length);
-        if (rawTxnItem.length > 1232) {
-          console.error("Swap transaction too large for chunk", i);
-          continue;
-        }
-
-        // try {
-        //   const { value: simulatedTransactionResponse } =
-        //     await connection.simulateTransaction(vTxn, {
-        //       sigVerify: false,
-        //       replaceRecentBlockhash: true,
-        //       commitment: 'confirmed'
-        //     });
-        //   const { err, logs } = simulatedTransactionResponse;
-        //   if (err) {
-        //     console.error("Swap Simulation Failed for chunk", i, { err, logs });
-        //     continue;
-        //   }
-        //   // rawTxns.push(rawTxnItem);
-        // } catch (simError: any) {
-        //   console.error("Error during swap simulation for chunk", i, simError.message);
-        //   continue;
-        // }
-
-        // console.log("🚀 Simulate Swap ~", Date.now());
 
         try {
           const sig = await connection.sendRawTransaction(rawTxnItem, {
@@ -967,191 +470,189 @@ export class PumpfunVbot {
             maxRetries: 3,
             preflightCommitment: 'confirmed'
           });
-          console.log("Buy/Sell tx:", sig);
-          const confirmation = await connection.confirmTransaction({
-            signature: sig,
-            blockhash: blockhash,
-            lastValidBlockHeight: lastValidBlockHeight
-          }, "confirmed");
+          logger.info(`Sent extend LUT tx: ${sig}`);
         } catch (e: any) {
-          console.error("Error sending buy/sell tx:", e.message);
-          throw new Error("Failed to send buy/sell tx.");
+          logger.error(`Error extending LUT: ${e.message}`);
+          continue;
         }
       }
+
+    } catch (e: any) {
+      logger.error(`Error extending LUT: ${e.message}`);
+      throw new Error(`Failed to extend Lookup Table.`);
+    }
+  }
+
+  async loadLUT() {
+    logger.info("Loading lookup table...");
+    if (!fs.existsSync(LUT_JSON)) {
+      logger.warn(
+        `${LUT_JSON} not found. Bot will attempt to create one if needed.`
+      );
+      this.lookupTableAccount = undefined!;
+      return;
+    }
+    const lutAddressString = JSON.parse(fs.readFileSync(LUT_JSON, "utf8"));
+    if (!lutAddressString) {
+      logger.error("LUT address in lut.json is empty or invalid.");
+      this.lookupTableAccount = undefined!;
+      return;
+    }
+    logger.info(`LUT address from file: ${lutAddressString}`);
+    const lutPubkey = new PublicKey(lutAddressString);
+
+    const lookupTableAccountResult = await connection.getAddressLookupTable(
+      lutPubkey
+    );
+
+    if (lookupTableAccountResult.value === null) {
+      logger.error(`Lookup table account ${lutPubkey.toBase58()} not found on-chain!`);
+      this.lookupTableAccount = undefined!;
+      return;
+    }
+    this.lookupTableAccount = lookupTableAccountResult.value;
+    logger.info(`Lookup table loaded successfully. Last extended slot: ${this.lookupTableAccount.state.lastExtendedSlot}`);
+  }
+
+  async swap() {
+    try {
+      console.log("🔄 [BOT] Starting BUY/SELL swap cycle...");
+      console.log("📊 [BOT] Total wallets:", this.keypairs?.length || 0);
+      
+      if (!this.keypairs || this.keypairs.length === 0) throw new Error("Wallets not loaded.");
+      if (!this.lookupTableAccount) {
+        console.log("🔍 [BOT] Loading lookup table...");
+        await this.loadLUT();
+        if (!this.lookupTableAccount) throw new Error("LUT not loaded and could not be loaded.");
+      }
+      if (!this.mint || !this.poolAddress) {
+        console.log("🔍 [BOT] Loading pump data...");
+        await this.getPumpData();
+        if (!this.mint || !this.poolAddress) throw new Error("Pump data could not be loaded.");
+      }
+
+      const chunkedKeypairs = this.chunkArray(this.keypairs, 3);
+      console.log("📦 [BOT] Processing", chunkedKeypairs.length, "chunks of wallets");
+
+      for (let i = 0; i < chunkedKeypairs.length; i++) {
+        const keypairsInChunk = chunkedKeypairs[i];
+        console.log(`🔄 [BOT] Processing chunk ${i + 1}/${chunkedKeypairs.length} (${keypairsInChunk.length} wallets)`);
+
+        for (const keypair of keypairsInChunk) {
+          const walletShort = keypair.publicKey.toBase58().substring(0, 8);
+          const solBalance = await connection.getBalance(keypair.publicKey);
+          const requiredForFees = FEE_ATA_LAMPORTS;
+
+          console.log(`👛 [BOT] Wallet ${walletShort}: ${(solBalance / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
+
+          if (solBalance <= requiredForFees) {
+            console.log(`⚠️ [BOT] Skipping wallet ${walletShort}: Insufficient balance for swap`);
+            continue;
+          } else if (solBalance >= 0.5 * LAMPORTS_PER_SOL) {
+            // Transfer excess SOL to main wallet
+            console.log(`💸 [BOT] Transferring excess SOL from wallet ${walletShort}`);
+            const transferAmount = solBalance - 0.005 * LAMPORTS_PER_SOL;
+            const transferIns = SystemProgram.transfer({
+              fromPubkey: keypair.publicKey,
+              toPubkey: userKeypair.publicKey,
+              lamports: transferAmount,
+            });
+            
+            const { blockhash } = await connection.getLatestBlockhash();
+            const messageV0 = new TransactionMessage({
+              payerKey: keypair.publicKey,
+              recentBlockhash: blockhash,
+              instructions: [transferIns],
+            }).compileToV0Message([this.lookupTableAccount]);
+
+            const vTxn = new VersionedTransaction(messageV0);
+            vTxn.sign([keypair]);
+            
+            try {
+              const sig = await connection.sendRawTransaction(vTxn.serialize(), {
+                skipPreflight: true,
+                maxRetries: 3,
+                preflightCommitment: 'confirmed'
+              });
+              console.log(`✅ [BOT] Transfer excess SOL tx: ${sig}`);
+            } catch (e: any) {
+              console.error(`❌ [BOT] Error transferring excess SOL: ${e.message}`);
+            }
+          } else {
+            const availableForSwap = solBalance - requiredForFees;
+            const solAmountForSwap = Math.floor(availableForSwap * (0.6 + Math.random() * 0.2));
+
+            if (solAmountForSwap <= 1000) {
+              console.log(`⚠️ [BOT] Skipping wallet ${walletShort}: Amount too low for swap`);
+              continue;
+            }
+
+            console.log(`🚀 [BOT] Starting swap cycle for wallet ${walletShort}`);
+            console.log(`💰 [BOT] SOL amount for swap: ${(solAmountForSwap / LAMPORTS_PER_SOL).toFixed(6)}`);
+
+            try {
+              // Use the correct PumpSwapSDK for buy
+              console.log(`🛒 [BOT] Executing BUY for wallet ${walletShort}...`);
+              await this.pumpswapSDK.buy(this.mint, keypair, solAmountForSwap / LAMPORTS_PER_SOL);
+              
+              // Wait a bit before selling
+              const waitTime = 1000 + Math.random() * 2000;
+              console.log(`⏳ [BOT] Waiting ${waitTime}ms before selling...`);
+              await this.sleepTime(waitTime);
+              
+              // Sell all tokens (100% of holdings)
+              console.log(`💸 [BOT] Executing SELL for wallet ${walletShort}...`);
+              await this.pumpswapSDK.sell_percentage(this.mint, keypair, 1.0);
+              
+              console.log(`✅ [BOT] Completed buy/sell cycle for wallet ${walletShort}`);
+              
+            } catch (error: any) {
+              console.error(`❌ [BOT] Error in swap cycle for wallet ${walletShort}: ${error.message}`);
+            }
+          }
+        }
+      }
+      console.log("🎉 [BOT] Swap cycle completed!");
     } catch (error: any) {
-      console.error(`Error during swap cycle: ${error.message}`);
+      console.error("❌ [BOT] Error during swap cycle:", error.message);
+      console.error("🔍 [BOT] Full error:", error);
     }
   }
 
   async sellAllTokensFromWallets() {
-    console.log("\n- Selling all tokens from sub-wallets...");
+    logger.info("Selling all tokens from sub-wallets...");
     if (!this.keypairs || this.keypairs.length === 0) throw new Error("Wallets not loaded.");
     if (!this.lookupTableAccount) {
       await this.loadLUT();
       if (!this.lookupTableAccount) throw new Error("LUT not loaded and could not be loaded.");
     }
-    if (!this.mint || !this.bondingCurve || !this.associatedBondingCurve) {
+    if (!this.mint || !this.poolAddress) {
       await this.getPumpData();
-      if (!this.mint || !this.bondingCurve) throw new Error("Pump data could not be loaded for selling.");
-    }
-    if (this.virtualSolReserves === 0) {
-      console.warn("Virtual SOL reserves are zero. Will attempt to sell but price calculation might be off or fail.");
-      await this.getPumpData();
-      if (this.virtualSolReserves === 0) throw new Error("Virtual SOL reserves are still zero after refresh. Cannot calculate sell price accurately.");
+      if (!this.mint || !this.poolAddress) throw new Error("Pump data could not be loaded for selling.");
     }
 
-
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-    const rawTxns: Uint8Array[] = [];
-    const chunkedKeypairs = chunkArray(this.keypairs, 4);
-
-    for (let i = 0; i < chunkedKeypairs.length; i++) {
-      const keypairsInChunk = chunkedKeypairs[i];
-      const instructions: TransactionInstruction[] = [];
-      const payerKeypair = keypairsInChunk[0];
-
-      for (const keypair of keypairsInChunk) {
-        const tokenATA = spl.getAssociatedTokenAddressSync(this.mint, keypair.publicKey, true);
-
-        try {
-          const ataInfo = await spl.getAccount(connection, tokenATA, "confirmed");
-          const tokenBalance = Number(ataInfo.amount);
-          const tokenDecimals = (ataInfo as any).decimals || 9;
-
-
-          if (tokenBalance > 0) {
-            console.log(`Wallet ${keypair.publicKey.toBase58().substring(0, 5)} has ${tokenBalance / (10 ** tokenDecimals)} tokens to sell.`);
-
-            const minSolOutput = Math.floor(
-              (tokenBalance * (1 - this.slippage) * this.virtualSolReserves) / this.virtualTokenReserves
-            );
-            if (minSolOutput <= 0) {
-              console.warn(`Calculated minSolOutput is ${minSolOutput} for ${tokenBalance} tokens. Skipping sell for wallet ${keypair.publicKey.toBase58()} to avoid issues or loss.`);
-              continue;
-            }
-
-            const sellData = Buffer.concat([
-              bufferFromUInt64("12502976635542562355"),
-              bufferFromUInt64(tokenBalance),
-              bufferFromUInt64(minSolOutput),
-            ]);
-
-            const sellKeys = [
-              { pubkey: GLOBAL, isSigner: false, isWritable: false },
-              { pubkey: FEE_RECIPIENT, isSigner: false, isWritable: true },
-              { pubkey: this.mint, isSigner: false, isWritable: false },
-              { pubkey: this.bondingCurve, isSigner: false, isWritable: true },
-              { pubkey: this.associatedBondingCurve, isSigner: false, isWritable: true },
-              { pubkey: tokenATA, isSigner: false, isWritable: true },
-              { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
-              { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
-              { pubkey: ASSOC_TOKEN_ACC_PROG, isSigner: false, isWritable: false },
-              { pubkey: spl.TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-              { pubkey: PUMP_FUN_ACCOUNT, isSigner: false, isWritable: false },
-              { pubkey: PUMP_FUN_PROGRAM, isSigner: false, isWritable: false },
-            ];
-
-            // instructions.push(spl.createAssociatedTokenAccountIdempotentInstruction(
-            //   keypair.publicKey, tokenATA, keypair.publicKey, this.mint
-            // ));
-            instructions.push(new TransactionInstruction({ keys: sellKeys, programId: PUMP_FUN_PROGRAM, data: sellData }));
-            instructions.push(spl.createCloseAccountInstruction(tokenATA, keypair.publicKey, keypair.publicKey));
-          }
-        } catch (error: any) {
-          if (error.message.includes("could not find account") || error.message.includes("Account does not exist")) {
-            // This is normal if the ATA was already closed or never had tokens
-          } else {
-            console.error(`Error checking token balance for wallet ${keypair.publicKey.toBase58()}: ${error.message}`);
-          }
-          continue;
-        }
-      }
-
-      if (instructions.length === 0) continue;
-
-      // if (i === chunkedKeypairs.length - 1) {
-      //   instructions.push(
-      //     SystemProgram.transfer({
-      //       fromPubkey: payerKeypair.publicKey,
-      //       toPubkey: new PublicKey(tipAccounts[0]),
-      //       lamports: this.jitoTipAmountLamports,
-      //     })
-      //   );
-      // }
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-
-      const messageV0 = new TransactionMessage({
-        payerKey: payerKeypair.publicKey,
-        recentBlockhash: blockhash,
-        instructions,
-      }).compileToV0Message([this.lookupTableAccount]);
-
-      const vTxn = new VersionedTransaction(messageV0);
-      const signersForTxn = new Set<Keypair>([payerKeypair]);
-      keypairsInChunk.forEach(kp => {
-        if (instructions.some(ix => ix.keys.some(k => k.isSigner && k.pubkey.equals(kp.publicKey)))) {
-          signersForTxn.add(kp);
-        }
-      });
-      vTxn.sign(Array.from(signersForTxn));
-
-      const rawTxnItem = vTxn.serialize();
-      console.log("Sell All Txn length:", rawTxnItem.length);
-      if (rawTxnItem.length > 1232) {
-        console.error("Sell All transaction too large for chunk", i);
-        continue;
-      }
-
-      // try {
-      //   const { value: simulatedTransactionResponse } =
-      //     await connection.simulateTransaction(vTxn, {
-      //       sigVerify: false,
-      //       replaceRecentBlockhash: true,
-      //       commitment: 'confirmed'
-      //     });
-      //   const { err, logs } = simulatedTransactionResponse;
-      //   console.log("🚀 Simulate Sell All ~", Date.now());
-      //   if (err) {
-      //     console.error("Sell All Simulation Failed for chunk", i, { err, logs });
-      //     continue;
-      //   }
-      //   rawTxns.push(rawTxnItem);
-      // } catch (simError: any) {
-      //   console.error("Error during Sell All simulation for chunk", i, simError.message);
-      //   continue;
-      // }
-
+    for (const keypair of this.keypairs) {
       try {
-        const sig = await connection.sendRawTransaction(rawTxnItem, {
-          skipPreflight: true,
-          maxRetries: 3,
-          preflightCommitment: 'confirmed'
-        });
-        console.log("Buy/Sell tx:", sig);
-        const confirmation = await connection.confirmTransaction({
-          signature: sig,
-          blockhash: blockhash,
-          lastValidBlockHeight: lastValidBlockHeight
-        }, "confirmed");
-      } catch (e: any) {
-        console.error("Error sending buy/sell tx:", e.message);
-        throw new Error("Failed to send buy/sell tx.");
+        // Use the correct PumpSwapSDK for selling
+        await this.pumpswapSDK.sell_percentage(this.mint, keypair, 1.0);
+        logger.info(`Sold all tokens for wallet ${keypair.publicKey.toBase58().substring(0, 5)}`);
+      } catch (error: any) {
+        logger.error(`Error selling tokens for wallet ${keypair.publicKey.toBase58().substring(0, 5)}: ${error.message}`);
       }
-
     }
+  }
 
-    // if (rawTxns.length > 0) {
-    //   console.log(`Sending ${rawTxns.length} transactions in a bundle to sell all tokens...`);
-    //   const bundleId = await this.jitoBundleInstance.sendBundle(rawTxns);
-    //   if (bundleId) {
-    //     const success = await this.jitoBundleInstance.getBundleStatus(bundleId);
-    //     if (success) console.log("Sell All Tokens bundle confirmed.");
-    //     else console.error("Sell All Tokens bundle failed to confirm.");
-    //   } else {
-    //     console.error("Failed to send Sell All Tokens bundle.");
-    //   }
-    // } else {
-    //   console.log("No tokens to sell or no valid sell transactions created.");
-    // }
+  // Utility functions
+  private chunkArray<T>(array: T[], size: number): T[][] {
+    if (size <= 0) {
+      throw new Error("Chunk size must be greater than 0.");
+    }
+    return Array.from({ length: Math.ceil(array.length / size) }, (v, i) =>
+      array.slice(i * size, i * size + size)
+    );
+  }
+
+  private async sleepTime(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

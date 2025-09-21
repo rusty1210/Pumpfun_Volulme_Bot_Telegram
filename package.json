@@ -11,6 +11,7 @@
     "lint": "eslint . --ext .ts"
   },
   "devDependencies": {
+    "@types/bn.js": "^5.2.0",
     "@types/bs58": "^4.0.4",
     "@types/node": "^20.12.2",
     "@types/node-telegram-bot-api": "^0.64.8",
@@ -18,13 +19,16 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
-    "@raydium-io/raydium-sdk": "^1.3.1-beta.58",
-    "@solana/spl-token": "^0.4.8",
-    "@solana/web3.js": "^1.95.3",
+    "@coral-xyz/anchor": "^0.30.1",
+    "@coral-xyz/borsh": "^0.30.1",
+    "@solana/spl-token": "^0.4.13",
+    "@solana/web3.js": "^1.98.0",
     "axios": "^1.7.7",
+    "bigint-buffer": "^1.1.5",
+    "bn.js": "^5.2.1",
     "bs58": "^6.0.0",
     "dotenv": "^16.4.5",
-    "jito-bundle-tip-service": "file:jito-bundle-tip-service/jito-bundle-tip-service-1.0.0.tgz",
+    "jito-ts": "^4.2.1",
     "node-telegram-bot-api": "^0.66.0"
   }
 }

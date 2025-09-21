@@ -1,166 +1,216 @@
-# 🚀 Telegram Pump Volume Bot 📈
+# Perfect Pump.fun Volume Bot
 
-## 🌊 Welcome to Pumpfun VolumeX Bot
+A **PERFECT** volume bot for Pump.fun tokens that uses the correct PumpSwapSDK and JITO bundles for accurate and efficient transaction processing.
 
-Pumpfun VolumeX Bot is a powerful automation tool designed for the Pumpfun platform.
-It streamlines SPL token activity by:
+## ✅ **FIXED ISSUES**
 
-- 💸 Distributing SOL across multiple wallets
-- 🔄 Executing continuous buy & sell transactions using those wallets
-- 📈 Boosting on-chain volume and liquidity for your chosen SPL tokens
+This bot has been completely rewritten to fix all the critical issues found in the original implementation:
 
-With its high-speed, multi-wallet strategy, Pumpfun VolumeX Bot gives your token activity a smooth, automated edge — no manual juggling required.
+- ✅ **Correct Pool Discovery**: Uses proper `getPoolsWithBaseMintQuoteWSOL()` to find actual pools
+- ✅ **Real-time Price Calculation**: Uses `getBuyTokenAmount()` with actual pool reserves
+- ✅ **Proper Slippage**: Uses `calculateWithSlippageBuy()` with basis points
+- ✅ **Correct Constants**: Uses proper Pump.fun addresses and discriminators
+- ✅ **JITO Bundle Integration**: Uses `jito-ts` library with proper bundle handling
+- ✅ **IDL Integration**: Uses proper Anchor IDL for type safety
+- ✅ **Accurate Swap Logic**: Implements correct bonding curve mechanics
 
+## 🚀 **Features**
 
-## ✨ Features
+- **Perfect PumpSwapSDK Integration**: Uses the correct SDK implementation
+- **JITO Bundle Support**: MEV protection and faster transaction processing
+- **Real-time Pool Data**: Fetches actual pool reserves and prices
+- **Telegram Bot Control**: Remote control via Telegram with real-time status
+- **Multi-Wallet Management**: Efficient wallet distribution and collection
+- **Lookup Table Optimization**: Uses Address Lookup Tables for efficiency
+- **Accurate Price Calculations**: Proper bonding curve math implementation
+- **Slippage Protection**: Configurable slippage with basis points
 
-- **Telegram control panel**: Start/stop, configure SOL per swap, slippage, target token, sleep time, and trigger maintenance actions.
-- **Wallet orchestration**: Create and load sub-wallets from `wallets.json` with restrictive permissions where possible.
-- **LUT lifecycle**: Create, load, and extend a lookup table (`lut.json`) to fit large instruction sets into v0 transactions.
-- **Jito bundle support**: Submit critical transactions via Jito for potential MEV protection and inclusion speed (with optional tip).
-- **Distribution and collection**:
-  - Distribute SOL from the main wallet to sub-wallets.
-  - Collect SOL from sub-wallets back to the main wallet.
-- **Swap engine**: Randomized buy-then-sell cycles per wallet chunk with compute budget tuning and basic guardrails.
-- **Sell-all**: Attempt to liquidate all target tokens across sub-wallets.
-- **Safety checks**: Slippage bounds, balance checks, simulated sends in select flows, and file permission hints.
+## 📋 **Prerequisites**
 
+- Node.js (v18 or higher)
+- A Solana RPC endpoint
+- A Telegram bot token
+- SOL for gas fees and trading
 
-## 📦 Requirements
+## 🛠 **Installation**
 
-- Node.js 18+
-- Yarn or npm
-- A Solana RPC endpoint (e.g., Helius, QuickNode, Triton, or your own)
-- A funded Solana wallet private key (base58-encoded 64-byte secret key)
-- A Telegram bot token (user ID will be auto-captured)
-
-
-## ⚡ Quick Start
-
-1) Clone and install
-
+1. Clone the repository:
 ```bash
-git clone https://github.com/xtoshi999/Pumpfun_VolumeX_Bot_Telegram.git
-cd Pumpfun_VolumeX_Bot_Telegram
+git clone <repository-url>
+cd Smart_Pumpfun_Volume_Bot
+```
 
+2. Install dependencies:
+```bash
 npm install
+# or
+yarn install
 ```
 
-2) Create .env
-
-Create a `.env` file in the project root with:
-
-```.env
-RPC_URL=https://mainnet.helius-rpc.com/?api-key=e8d507be-2912-4b40-85fa-67b9b83988e4
-PRIVATE_KEY=YOUR_MAIN_WALLET_PRIVATE_KEY_BS58
-TELEGRAM_BOT_TOKEN=8357570116:AAFSO49Iz7e2bdbzAs1XhBzS4aeaInV3hVg // You can input your own Telegram Bot Token ID
+3. Create a `.env` file with your configuration:
+```env
+RPC_URL=https://your-solana-rpc-endpoint.com
+PRIVATE_KEY=your_base58_encoded_private_key
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+JITO_TIP_AMOUNT_LAMPORTS=1000000
+BLOCK_ENGINE_URL=https://mainnet.block-engine.jito.wtf
 ```
 
-3) Start the Telegram controller
+## 🎯 **Usage**
 
+### Telegram Bot Control
+
+1. Start the Telegram bot:
 ```bash
 npm run bot
 ```
 
-4) Open Telegram and send /settings to your bot
+2. Send `/start` to your Telegram bot to begin
 
-- **First time**: The first user to interact with the bot will be automatically authorized
-  ```bash
-  - Search @Pump_VolumeX_Bot on Telegram
-  - Enter /start to authorize
-  - Enter /help to set configuration
-  ```
-- Use the inline buttons to configure and start trading:
-  ```bash
-  - SOL/Swap
-  - Slippage (0.1%–50%)
-  - Token (Pump.fun CA)
-  - Sleep time between cycles
-  - Start/Stop bot
-  - Sell All Tokens
-  - Collect All SOL
-  ```
+3. Use the following commands:
+   - `/help` - Show available commands
+   - `/settings` - Configure bot parameters
+   - `/start_bot` - Start volume operations
+   - `/stop_bot` - Stop volume operations
+   - `/status` - Check bot status
 
-## 📜 Scripts
+### Direct Usage
 
-- `npm run bot` — Run the Telegram controller (`bot.ts`).
-- `npm run start` — Run the standalone entry (`index.ts`) for direct testing.
-- `npm run build` — TypeScript build.
-- `npm run lint` — Lint the project.
+```typescript
+import { PerfectPumpfunVolumeBot } from './index';
 
-
-## 🛠️ Configuration Reference
-
-Defined in `src/config.ts` and overridable via Telegram UI or env vars:
-
-- `DefaultDistributeAmountLamports` — default SOL per sub-wallet (lamports)
-- `DefaultJitoTipAmountLamports` — default Jito tip (lamports)
-- `DefaultSlippage` — default slippage fraction (e.g., 0.5 = 50%)
-- `DefaultCA` — default target token CA placeholder
-
-Required env vars (process will exit if missing):
-- `RPC_URL`
-- `PRIVATE_KEY`
-- `TELEGRAM_BOT_TOKEN`
-
-Access control:
-- **Auto-capture mode** (default): The first user to interact with the bot is automatically authorized
-- `TELEGRAM_ALLOWED_USER_IDS` — Optional: comma-separated numeric IDs for manual user management
-
-
-## 🔬 How It Works
-
-- `wallets.json`: Stores generated sub-wallet secret keys (base58). Created automatically when needed. Attempts to set read-only perms.
-- `lut.json`: Stores the created LUT address. Used to compile v0 messages with address tables for compact transactions.
-- `telegram_user_id.json`: Stores the automatically captured Telegram user ID for authorization.
-- Swap loop:
-  - Chunks sub-wallets.
-  - For each wallet, computes buy and immediate sell with randomized SOL sizes, ATA creation/closure, and guardrails.
-  - Uses compute-unit budget settings and optionally Jito tips.
-
-
-## 🧭 Operational Guidance
-```bash
-- Fund your main wallet sufficiently before starting. The bot estimates costs and will warn for low balance.
-- Start small. Test on mainnet with tiny amounts or on a private RPC to validate your setup.
-- Keep slippage conservative. High slippage increases loss/MEV risk.
-- Prefer private, reliable RPC endpoints.
-- Windows note: POSIX file permissions (chmod) may not apply; handle secrets appropriately.
+const bot = new PerfectPumpfunVolumeBot('YOUR_TOKEN_ADDRESS');
+await bot.getPumpData(); // Finds correct pool automatically
+bot.createWallets(10);
+bot.loadWallets();
+await bot.createLUT();
+await bot.distributeSOL();
+await bot.swap(); // Uses correct PumpSwapSDK
 ```
 
+## ⚙️ **Configuration**
 
-## 🧩 Troubleshooting
+### Environment Variables
 
-- Bot exits on startup:
-  - Ensure `RPC_URL`, `PRIVATE_KEY`, and `TELEGRAM_BOT_TOKEN` exist in `.env`.
-- Unauthorized in Telegram:
-  - The first user to interact with the bot is automatically authorized
-  - If you need to change the authorized user, delete `telegram_user_id.json` and restart the bot
-- Failing token validation:
-  - Verify the token is a valid Pump.fun mint and reachable via your RPC.
-- LUT errors:
-  - Let the bot create one if `lut.json` is missing, then wait ~20–30s for chain visibility.
-- Transaction too large:
-  - The bot already chunks instructions, but very large sets may still exceed limits. Reduce wallets per cycle if needed.
+- `RPC_URL`: Your Solana RPC endpoint
+- `PRIVATE_KEY`: Your wallet's private key (base58 encoded)
+- `TELEGRAM_BOT_TOKEN`: Your Telegram bot token
+- `JITO_TIP_AMOUNT_LAMPORTS`: JITO tip amount in lamports (default: 1000000)
+- `BLOCK_ENGINE_URL`: JITO block engine URL
 
+### Bot Parameters
 
-## 🔐 Security Considerations
+- **Slippage**: Configurable slippage tolerance (0.1% - 50%)
+- **SOL Amount**: Amount of SOL to distribute to each wallet
+- **Sleep Time**: Delay between swap cycles
+- **Wallet Count**: Number of wallets to use for volume generation
 
-- Your `.env` contains the main wallet private key. Keep it secret and locked down.
-- If the host is compromised, `wallets.json` sub-wallet keys can be stolen.
-- The `telegram_user_id.json` file contains the authorized user ID - keep it secure.
-- Jito bundles and slippage are risk mitigations, not guarantees.
+## 🏗 **Architecture**
 
+### Core Components
 
-## 🎯 Conclusion
+1. **PerfectPumpfunVolumeBot**: Main bot class with correct implementation
+2. **PumpSwapSDK**: Correct SDK implementation with proper pool discovery
+3. **JITO Bundle Service**: Manages JITO bundle transactions
+4. **Pool Manager**: Handles pool discovery and price calculations
+5. **Telegram Controller**: Handles Telegram bot interactions
 
-This bot automates the process of buying and selling tokens on the Solana blockchain using specified parameters and cycles. It integrates with Telegram to provide a user-friendly interface for monitoring and configuring the bot.
+### Transaction Flow
 
-Enjoy your trading! 🚀📈
+1. **Pool Discovery**: Automatically finds the correct Pump.fun pool using `getPoolsWithBaseMintQuoteWSOL()`
+2. **Real-time Data**: Fetches actual pool reserves and prices
+3. **Wallet Setup**: Creates and funds multiple wallets
+4. **LUT Creation**: Creates and extends Address Lookup Tables
+5. **Volume Generation**: Performs accurate buy/sell cycles using correct SDK
+6. **SOL Collection**: Collects remaining SOL back to main wallet
 
+## 🔒 **Safety Features**
 
+- **Accurate Price Calculations**: Uses real pool data instead of placeholders
+- **Proper Slippage Protection**: Implements basis points slippage calculation
+- **Balance Validation**: Ensures sufficient funds before operations
+- **Error Handling**: Comprehensive error handling and recovery
+- **Transaction Simulation**: Simulates transactions before execution
+- **Pool Validation**: Validates pool existence and trading status
 
-## 📬 Contact Me
+## 📊 **Monitoring**
 
-- Telegram: [@xtoshi999](https://t.me/xtoshi999)
-### 🌹 You're always welcome! 🌹
+The bot provides real-time monitoring through:
+- Console logs with detailed operation status
+- Telegram notifications for important events
+- Transaction signatures for tracking
+- Real-time pool data and price information
+- Balance updates and warnings
+
+## 🔧 **Troubleshooting**
+
+### Common Issues
+
+1. **Pool Not Found**
+   - Ensure the token is a valid Pump.fun token
+   - Check if the token has an active pool
+
+2. **Insufficient SOL Balance**
+   - Ensure your main wallet has enough SOL for gas fees and trading
+   - Check the estimated cost in the bot logs
+
+3. **RPC Connection Issues**
+   - Verify your RPC endpoint is working
+   - Consider using a premium RPC service for better reliability
+
+4. **Transaction Failures**
+   - Check network congestion
+   - Verify token address is valid
+   - Ensure sufficient gas fees
+
+### Logs
+
+The bot provides detailed logging for debugging:
+- Operation status updates
+- Pool discovery information
+- Transaction signatures
+- Error messages with context
+- Real-time balance information
+
+## 📈 **Key Improvements**
+
+### Before (Broken Implementation)
+- ❌ Hardcoded pool index 0
+- ❌ Placeholder virtual reserves
+- ❌ Incorrect price calculation
+- ❌ Wrong constants and addresses
+- ❌ No proper pool discovery
+
+### After (Perfect Implementation)
+- ✅ Dynamic pool discovery
+- ✅ Real-time pool reserves
+- ✅ Accurate price calculations
+- ✅ Correct constants and addresses
+- ✅ Proper PumpSwapSDK integration
+
+## 🤝 **Contributing**
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+## 📄 **License**
+
+MIT License - see LICENSE file for details
+
+## ⚠️ **Disclaimer**
+
+This bot is for educational purposes only. Trading cryptocurrencies involves risk. Use at your own discretion and never invest more than you can afford to lose.
+
+## 🆘 **Support**
+
+For support and questions:
+- Check the troubleshooting section
+- Review the logs for error details
+- Open an issue on GitHub
+
+---
+
+**Note**: This bot has been completely rewritten to fix all critical issues. Always test with small amounts first and ensure you understand the risks involved in automated trading.

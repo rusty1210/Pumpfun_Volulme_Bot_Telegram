@@ -1,6 +1,6 @@
 import TelegramController from './src/telegram';
 
-console.log('🚀 Starting Telegram bot controller...');
+console.log('Starting Telegram bot controller...');
 // Ensure TELEGRAM_BOT_TOKEN and other necessary env vars are loaded before this
 // (dotenv is called in config.ts, which telegram.ts imports)
 try {

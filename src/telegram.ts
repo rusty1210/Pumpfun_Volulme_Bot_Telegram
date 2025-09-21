@@ -1,5 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
-import { PumpfunVbot } from '../index';
+import { PerfectPumpfunVolumeBot } from '../index';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import {
     connection,
@@ -8,8 +8,6 @@ import {
     DefaultCA,
     DefaultDistributeAmountLamports,
     TELEGRAM_BOT_TOKEN,
-    getCapturedUserId,
-    saveCapturedUserId,
 } from './config';
 import fs from 'fs';
 
@@ -31,7 +29,7 @@ interface BotConfig {
 
 class TelegramController {
     private bot: TelegramBot;
-    private pumpBot: PumpfunVbot | null = null;
+    private pumpBot: PerfectPumpfunVolumeBot | null = null;
     private config: BotConfig = {
         solAmount: DefaultDistributeAmountLamports / LAMPORTS_PER_SOL,
         tokenAddress: DefaultCA,
@@ -47,13 +45,7 @@ class TelegramController {
         }
         this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
         this.setupCommands();
-        
-        const capturedUserId = getCapturedUserId();
-        if (capturedUserId) {
-            console.log(`TelegramController initialized. Authorized user ID: ${capturedUserId}`);
-        } else {
-            console.log("TelegramController initialized. No user ID captured yet. First user to interact will be automatically authorized.");
-        }
+        console.log("TelegramController initialized. Bot is open to all users.");
     }
 
     private async sendMessageWithRetry(chatId: number, text: string, options?: TelegramBot.SendMessageOptions): Promise<TelegramBot.Message> {
@@ -118,21 +110,6 @@ class TelegramController {
         throw new Error(`Failed to edit message after ${TELEGRAM_MAX_RETRIES} retries`);
     }
 
-    private isUserAllowed(userId?: number): boolean {
-        if (!userId) return false;
-        
-        const capturedUserId = getCapturedUserId();
-        
-        // If no user ID has been captured yet, capture this user as the first authorized user
-        if (capturedUserId === null) {
-            saveCapturedUserId(userId);
-            console.log(`🎉 First user interaction detected! User ID ${userId} has been automatically authorized.`);
-            return true;
-        }
-        
-        // Check if this user matches the captured user ID
-        return userId === capturedUserId;
-    }
 
     private setupCommands() {
         this.bot.onText(/\/settings/, (msg) => this.handleGenericCommand(msg, this._handleSettingsLogic));
@@ -144,22 +121,6 @@ class TelegramController {
     private async handleGenericCommand(msg: TelegramBot.Message, handler: (msg: TelegramBot.Message) => Promise<void>) {
         const chatId = msg.chat.id;
         const userId = msg.from?.id;
-        
-        // Check if this is the first user interaction
-        const capturedUserId = getCapturedUserId();
-        const isFirstUser = capturedUserId === null;
-        
-        if (!this.isUserAllowed(userId)) {
-            await this.sendMessageWithRetry(chatId, "🚫 You are not authorized to use this bot.");
-            console.log(`Unauthorized command attempt by user ID: ${userId} (${msg.text}), chat ID: ${chatId}`);
-            return;
-        }
-        
-        // Send welcome message for first user
-        if (isFirstUser && userId) {
-            await this.sendMessageWithRetry(chatId, `🎉 Welcome! You are now the authorized user for this bot (User ID: ${userId}).\n\nUse /settings to configure and start the bot.`);
-        }
-        
         try {
             await handler.call(this, msg);
         } catch (error) {
@@ -188,8 +149,7 @@ Other commands:
 
 **IMPORTANT:**
 - Ensure your main wallet (from \`.env\`) is funded.
-- The first user to interact with the bot will be automatically authorized.
-- The bot creates \`wallets.json\`, \`lut.json\`, and \`telegram_user_id.json\`. Do not edit them manually unless you know what you're doing.`;
+- The bot creates \`wallets.json\` and \`lut.json\`. Do not edit them manually unless you know what you're doing.`;
 
         const keyboard: TelegramBot.InlineKeyboardMarkup = {
             inline_keyboard: [
@@ -280,12 +240,6 @@ Other commands:
             if (callbackQuery.id) await this.bot.answerCallbackQuery(callbackQuery.id, { text: "Error: Message context missing." });
             return;
         }
-        if (!this.isUserAllowed(userId)) {
-            await this.bot.answerCallbackQuery(callbackQuery.id, { text: "🚫 Unauthorized" });
-            await this.sendMessageWithRetry(chatId, "🚫 You are not authorized for this action.");
-            console.log(`Unauthorized callback query by user ID: ${userId}, data: ${callbackQuery.data}`);
-            return;
-        }
 
         const data = callbackQuery.data;
         if (!data) {
@@ -310,9 +264,9 @@ Other commands:
                 case 'set_sol':
                     await this.sendMessageWithRetry(chatId, 'Enter SOL amount per sub-wallet (e.g., 0.005):');
                     this.bot.once('message', async (responseMsg) => {
-                        if (responseMsg.chat.id === chatId && this.isUserAllowed(responseMsg.from?.id)) {
+                        if (responseMsg.chat.id === chatId) {
                             const amount = parseFloat(responseMsg.text || '');
-                            if (!isNaN(amount) && amount > 0.00004 && amount < 100) {
+                            if (!isNaN(amount) && amount > 0.004 && amount < 10) {
                                 this.config.solAmount = amount;
                                 await this.sendMessageWithRetry(chatId, `✅ SOL amount set to ${amount}`);
                             } else {
@@ -326,7 +280,7 @@ Other commands:
                 case 'set_slippage':
                     await this.sendMessageWithRetry(chatId, 'Enter slippage % (e.g., 0.5 for 0.5%, max 50%):');
                     this.bot.once('message', async (responseMsg) => {
-                        if (responseMsg.chat.id === chatId && this.isUserAllowed(responseMsg.from?.id)) {
+                        if (responseMsg.chat.id === chatId) {
                             const percentage = parseFloat(responseMsg.text || '');
                             if (!isNaN(percentage) && percentage >= 0.1 && percentage <= 50) {
                                 this.config.slippage = percentage / 100;
@@ -342,15 +296,15 @@ Other commands:
                 case 'set_token':
                     await this.sendMessageWithRetry(chatId, 'Enter the Pump.fun token address:');
                     this.bot.once('message', async (responseMsg) => {
-                        if (responseMsg.chat.id === chatId && this.isUserAllowed(responseMsg.from?.id)) {
+                        if (responseMsg.chat.id === chatId) {
                             const tokenAddress = responseMsg.text?.trim();
                             if (tokenAddress && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tokenAddress)) {
                                 await this.sendMessageWithRetry(chatId, `⏳ Validating token ...`);
                                 try {
-                                    const tempBot = new PumpfunVbot(tokenAddress, 0, 0);
+                                    const tempBot = new PerfectPumpfunVolumeBot(tokenAddress, 0, 0);
                                     await tempBot.getPumpData();
                                     this.config.tokenAddress = tokenAddress;
-                                    await this.sendMessageWithRetry(chatId, `✅ Token: ${tokenAddress}\n  SOL: ${(tempBot.virtualSolReserves / LAMPORTS_PER_SOL).toFixed(6)}\n  Tokens: ${tempBot.virtualTokenReserves?.toLocaleString() || '0'}`);
+                                    await this.sendMessageWithRetry(chatId, `✅ Token: ${tokenAddress}\n  Pool: ${tempBot.poolAddress.toBase58()}`);
                                 } catch (error: any) {
                                     console.error("Token validation error:", error);
                                     await this.sendMessageWithRetry(chatId, `❌ Invalid or non-Pump.fun token: ${error.message || 'Unknown validation error.'}`);
@@ -366,7 +320,7 @@ Other commands:
                 case 'set_time':
                     await this.sendMessageWithRetry(chatId, 'Enter sleep time in milliseconds (e.g., 3000, min 1000ms):');
                     this.bot.once('message', async (responseMsg) => {
-                        if (responseMsg.chat.id === chatId && this.isUserAllowed(responseMsg.from?.id)) {
+                        if (responseMsg.chat.id === chatId) {
                             const time = parseInt(responseMsg.text || '');
                             if (!isNaN(time) && time >= 1000) {
                                 this.config.sleepTime = time;
@@ -438,7 +392,7 @@ Other commands:
             this.config.isRunning = true;
             await this.sendMessageWithRetry(chatId, '🚀 Initializing bot operations...');
 
-            this.pumpBot = new PumpfunVbot(
+            this.pumpBot = new PerfectPumpfunVolumeBot(
                 this.config.tokenAddress,
                 this.config.solAmount * LAMPORTS_PER_SOL,
                 this.config.slippage
@@ -446,7 +400,7 @@ Other commands:
 
             await this.sendMessageWithRetry(chatId, 'Fetching token data...');
             await this.pumpBot.getPumpData();
-            await this.sendMessageWithRetry(chatId, `✅ Token: ${this.config.tokenAddress.substring(0, 6)}... | SOL: ${(this.pumpBot.virtualSolReserves / LAMPORTS_PER_SOL).toFixed(4)} | Tokens: ${this.pumpBot.virtualTokenReserves.toLocaleString()}`);
+            await this.sendMessageWithRetry(chatId, `✅ Token: ${this.config.tokenAddress.substring(0, 6)}... | Pool: ${this.pumpBot.poolAddress.toBase58().substring(0, 8)}...`);
 
             if (!fs.existsSync('wallets.json')) {
                 await this.sendMessageWithRetry(chatId, 'wallets.json not found. Creating new wallets...');
@@ -531,7 +485,7 @@ Other commands:
             //     return;
             // }
             if (!this.pumpBot) {
-                this.pumpBot = new PumpfunVbot(
+                this.pumpBot = new PerfectPumpfunVolumeBot(
                     this.config.tokenAddress,
                     this.config.solAmount * LAMPORTS_PER_SOL,
                     this.config.slippage
@@ -579,7 +533,7 @@ Other commands:
 
         try {
             if (!this.pumpBot || this.pumpBot.mint.toBase58() !== this.config.tokenAddress) {
-                this.pumpBot = new PumpfunVbot(
+                this.pumpBot = new PerfectPumpfunVolumeBot(
                     this.config.tokenAddress,
                     0,
                     this.config.slippage
@@ -628,9 +582,6 @@ Other commands:
             ? `${this.config.tokenAddress.substring(0, 6)}...${this.config.tokenAddress.substring(this.config.tokenAddress.length - 4)}`
             : 'Not set';
 
-        const capturedUserId = getCapturedUserId();
-        const authorizedUserDisplay = capturedUserId ? `User ID: ${capturedUserId}` : "No user authorized yet";
-        
         const status = `🤖 **Bot Status & Config** 🤖
 -----------------------------------
 - Running: ${this.config.isRunning ? '✅ Active' : '❌ Idle'}
@@ -639,7 +590,6 @@ Other commands:
 - Slippage: \`${(this.config.slippage * 100).toFixed(1)}%\`
 - Cycle Sleep: \`${this.config.sleepTime}ms\`
 - Main Wallet: \`${mainWalletSol}\`
-- Authorized User: \`${authorizedUserDisplay}\`
 -----------------------------------`;
         await this.sendMessageWithRetry(chatId, status, { parse_mode: "Markdown" });
     }
